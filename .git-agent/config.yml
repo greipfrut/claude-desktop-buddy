@@ -1,0 +1,7 @@
+scopes:
+    - name: src
+      description: Application source code files and libraries
+    - name: tools
+      description: Build, test and deployment helper scripts
+    - name: char
+      description: Character animation assets and related files
