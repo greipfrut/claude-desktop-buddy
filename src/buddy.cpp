@@ -9,9 +9,13 @@ extern TFT_eSprite spr;
 enum { B_SLEEP, B_IDLE, B_BUSY, B_ATTENTION, B_CELEBRATE, B_DIZZY, B_HEART };
 
 // ──────────────── shared geometry ────────────────
-const int BUDDY_X_CENTER = 67;
-const int BUDDY_CANVAS_W = 135;
-const int BUDDY_Y_BASE   = 30;
+// Full 240×320 sprite. Species ASCII art centers horizontally on
+// BUDDY_X_CENTER and stacks down from BUDDY_Y_BASE. Y_BASE bumped from
+// 30 → 60 so the 2× body lands near vertical center of the taller panel
+// instead of clinging to the top.
+const int BUDDY_X_CENTER = 120;
+const int BUDDY_CANVAS_W = 240;
+const int BUDDY_Y_BASE   = 60;
 const int BUDDY_Y_OVERLAY = 6;
 const int BUDDY_CHAR_W   = 6;
 const int BUDDY_CHAR_H   = 8;
@@ -187,9 +191,10 @@ void buddyTick(uint8_t personaState) {
   lastDrawnState = personaState;
   lastDrawnSpecies = currentSpeciesIdx;
 
-  // Clear the whole render strip — at 2× the body reaches y≈126, at 1× ≈82.
-  spr.fillRect(0, 0, BUDDY_CANVAS_W,
-               (BUDDY_Y_BASE + 5 * BUDDY_CHAR_H + 12) * _scale, BUDDY_BG);
+  // Clear the whole render strip — at 2× the body reaches y≈186, at 1× ≈112.
+  int stripH = (BUDDY_Y_BASE + 5 * BUDDY_CHAR_H + 12) * _scale;
+  if (stripH > spr.height()) stripH = spr.height();
+  spr.fillRect(0, 0, BUDDY_CANVAS_W, stripH, BUDDY_BG);
 
   const Species* sp = SPECIES_TABLE[currentSpeciesIdx];
   if (sp->states[personaState]) sp->states[personaState](tickCount);

@@ -42,7 +42,7 @@ static int         gifX = 0, gifY = 0, gifW = 0, gifH = 0;
 // Peek mode pins the GIF bottom to the info-panel top (y=70) so the pet
 // sits on the panel edge regardless of canvas height. Home mode centers
 // in the upper 140px. No padding assumed in the source art.
-static const int   PEEK_TOP = 70;
+static const int   PEEK_TOP = 100;
 static bool        peekMode = false;
 // Draw target — defaults to the sprite; characterRenderTo() retargets to
 // M5.Lcd for the landscape clock (both inherit TFT_eSPI).
@@ -53,7 +53,9 @@ static void gifPlace() {
   int outW = peekMode ? gifW / 2 : gifW;
   int outH = peekMode ? gifH / 2 : gifH;
   gifX = (spr.width() - outW) / 2;
-  gifY = peekMode ? (PEEK_TOP - outH) / 2 : (140 - outH) / 2;
+  // Home mode centers inside the upper buddy zone (~top 210 on 320-tall);
+  // peek pins the bottom to the info/pet header at PEEK_TOP.
+  gifY = peekMode ? (PEEK_TOP - outH) / 2 : (210 - outH) / 2;
 }
 static uint32_t    nextFrameAt = 0;
 static uint32_t    animPauseUntil = 0;
@@ -344,7 +346,7 @@ void characterTick() {
 
     // Clear a band around the text, not the whole sprite — keeps overlays
     // like the approval panel and the HUD untouched.
-    int cy = peekMode ? 35 : 60;
+    int cy = peekMode ? 50 : 90;
     spr.fillRect(0, cy - 14, spr.width(), 28, pal.bg);
 
     const char* line = ts.frames[textFrame];
