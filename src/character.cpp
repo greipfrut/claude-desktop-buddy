@@ -1,8 +1,10 @@
 #include "character.h"
-#include <M5StickCPlus.h>
+#include <TFT_eSPI.h>
+#include <FS.h>
 #include <LittleFS.h>
 #include <AnimatedGIF.h>
 #include <ArduinoJson.h>
+using fs::File;
 
 extern TFT_eSprite spr;
 
