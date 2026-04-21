@@ -39,6 +39,10 @@ static uint8_t curState = 0xFF;
 static AnimatedGIF gif;
 static File        gifFile;
 static int         gifX = 0, gifY = 0, gifW = 0, gifH = 0;
+// Home-mode integer upscale — 2× when the native GIF is small enough to fit
+// in the 240×210 buddy zone at 2:1 nearest-neighbor, else 1×. Set on each
+// gifPlace() call so a character swap picks the best fit automatically.
+static int         homeScale = 1;
 // Peek mode pins the GIF bottom to the info-panel top (y=70) so the pet
 // sits on the panel edge regardless of canvas height. Home mode centers
 // in the upper 140px. No padding assumed in the source art.
@@ -50,11 +54,17 @@ static TFT_eSPI*   _tgt = &spr;
 // Peek mode renders at half scale (2:1 nearest-neighbor in gifDrawCb) so
 // the whole pet fits the 70px window instead of cropping the top.
 static void gifPlace() {
-  int outW = peekMode ? gifW / 2 : gifW;
-  int outH = peekMode ? gifH / 2 : gifH;
+  int outW, outH;
+  if (peekMode) {
+    outW = gifW / 2;
+    outH = gifH / 2;
+  } else {
+    // Try 2× upscale; fall back to 1× if the native canvas is too big.
+    homeScale = (gifW * 2 <= spr.width() && gifH * 2 <= 210) ? 2 : 1;
+    outW = gifW * homeScale;
+    outH = gifH * homeScale;
+  }
   gifX = (spr.width() - outW) / 2;
-  // Home mode centers inside the upper buddy zone (~top 210 on 320-tall);
-  // peek pins the bottom to the info/pet header at PEEK_TOP.
   gifY = peekMode ? (PEEK_TOP - outH) / 2 : (210 - outH) / 2;
 }
 static uint32_t    nextFrameAt = 0;
@@ -128,11 +138,28 @@ static void gifDrawCb(GIFDRAW* d) {
     return;
   }
 
+  int w = d->iWidth;
+  if (w > 256) w = 256;
+
+  // Home 2× path: each source pixel becomes a 2×2 block. TFT_eSprite::drawPixel
+  // clips out-of-bounds writes internally so no manual guard needed.
+  if (homeScale == 2) {
+    int yBase = gifY + srcY * 2;
+    int xBase = gifX + d->iX * 2;
+    for (int i = 0; i < w; i++) {
+      uint8_t idx = src[i];
+      int x = xBase + i * 2;
+      put(x,     yBase,     idx);
+      put(x + 1, yBase,     idx);
+      put(x,     yBase + 1, idx);
+      put(x + 1, yBase + 1, idx);
+    }
+    return;
+  }
+
   int y = gifY + srcY;
   if (y < 0 || y >= spr.height()) return;
   int x0 = gifX + d->iX;
-  int w  = d->iWidth;
-  if (w > 256) w = 256;
   if (x0 < 0) { src -= x0; w += x0; x0 = 0; }
   if (x0 + w > spr.width()) w = spr.width() - x0;
   if (w <= 0) return;
@@ -344,17 +371,20 @@ void characterTick() {
     if (now < textNext) return;
     textNext = now + ts.delayMs;
 
-    // Clear a band around the text, not the whole sprite — keeps overlays
-    // like the approval panel and the HUD untouched.
-    int cy = peekMode ? 50 : 90;
-    spr.fillRect(0, cy - 14, spr.width(), 28, pal.bg);
+    // Home renders at size 3 (18×24 glyph); peek stays size 2 to fit the
+    // narrower window. Clear band tracks the active size.
+    int sz = peekMode ? 2 : 3;
+    int gh = sz * 8;
+    int gw = sz * 6;
+    int cy = peekMode ? 50 : 120;
+    spr.fillRect(0, cy - gh/2 - 4, spr.width(), gh + 8, pal.bg);
 
     const char* line = ts.frames[textFrame];
     int len = strlen(line);
-    int tw = len * 12;                                    // size-2 glyph width
+    int tw = len * gw;
     spr.setTextColor(pal.body, pal.bg);
-    spr.setTextSize(2);
-    spr.setCursor((spr.width() - tw) / 2, cy - 8);
+    spr.setTextSize(sz);
+    spr.setCursor((spr.width() - tw) / 2, cy - gh/2);
     spr.print(line);
 
     textFrame = (textFrame + 1) % ts.nFrames;
