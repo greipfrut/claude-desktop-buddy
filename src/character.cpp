@@ -39,27 +39,27 @@ static uint8_t curState = 0xFF;
 static AnimatedGIF gif;
 static File        gifFile;
 static int         gifX = 0, gifY = 0, gifW = 0, gifH = 0;
-// Home-mode integer upscale — 2× when the native GIF is small enough to fit
-// in the 240×210 buddy zone at 2:1 nearest-neighbor, else 1×. Set on each
-// gifPlace() call so a character swap picks the best fit automatically.
-static int         homeScale = 1;
-// Peek mode pins the GIF bottom to the info-panel top (y=70) so the pet
-// sits on the panel edge regardless of canvas height. Home mode centers
-// in the upper 140px. No padding assumed in the source art.
+// Integer nearest-neighbor scale factors — picked per-character so small GIFs
+// get visually amplified without cropping larger ones.
+//   homeScale:  1 = native, 2 = 2× block upscale (fits 240×210 home zone)
+//   peekIsHalf: true = 2:1 downscale (legacy path), false = native 1:1 in the
+//               0..100 peek strip
+static int         homeScale  = 1;
+static bool        peekIsHalf = true;
 static const int   PEEK_TOP = 100;
 static bool        peekMode = false;
 // Draw target — defaults to the sprite; characterRenderTo() retargets to
 // M5.Lcd for the landscape clock (both inherit TFT_eSPI).
 static TFT_eSPI*   _tgt = &spr;
-// Peek mode renders at half scale (2:1 nearest-neighbor in gifDrawCb) so
-// the whole pet fits the 70px window instead of cropping the top.
 static void gifPlace() {
   int outW, outH;
   if (peekMode) {
-    outW = gifW / 2;
-    outH = gifH / 2;
+    // Use native 1:1 when the GIF already fits the peek strip — preserves
+    // the thicker look requested for detail pages.
+    peekIsHalf = !(gifH <= PEEK_TOP && gifW <= spr.width());
+    outW = peekIsHalf ? gifW / 2 : gifW;
+    outH = peekIsHalf ? gifH / 2 : gifH;
   } else {
-    // Try 2× upscale; fall back to 1× if the native canvas is too big.
     homeScale = (gifW * 2 <= spr.width() && gifH * 2 <= 210) ? 2 : 1;
     outW = gifW * homeScale;
     outH = gifH * homeScale;
@@ -129,12 +129,23 @@ static void gifDrawCb(GIFDRAW* d) {
   };
 
   if (peekMode) {
-    if (srcY & 1) return;
-    int y = gifY + (srcY >> 1);
-    if (y < 0 || y >= PEEK_TOP) return;
-    int x0 = gifX + (d->iX >> 1);
-    int w  = d->iWidth >> 1;
-    for (int i = 0; i < w; i++) put(x0 + i, y, src[i << 1]);
+    if (peekIsHalf) {
+      if (srcY & 1) return;
+      int y = gifY + (srcY >> 1);
+      if (y < 0 || y >= PEEK_TOP) return;
+      int x0 = gifX + (d->iX >> 1);
+      int w  = d->iWidth >> 1;
+      for (int i = 0; i < w; i++) put(x0 + i, y, src[i << 1]);
+    } else {
+      int y = gifY + srcY;
+      if (y < 0 || y >= PEEK_TOP) return;
+      int x0 = gifX + d->iX;
+      int w  = d->iWidth;
+      if (w > 256) w = 256;
+      if (x0 < 0) { src -= x0; w += x0; x0 = 0; }
+      if (x0 + w > spr.width()) w = spr.width() - x0;
+      if (w > 0) for (int i = 0; i < w; i++) put(x0 + i, y, src[i]);
+    }
     return;
   }
 

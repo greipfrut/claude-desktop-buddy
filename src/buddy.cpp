@@ -58,14 +58,12 @@ void buddyPrintLine(const char* line, int yPx, uint16_t color, int xOff) {
 
 void buddyPrintSprite(const char* const* lines, uint8_t nLines, int yOffset, uint16_t color, int xOff) {
   _tgt->setTextSize(_scale);
-  // yBase picks where the body's top line lands. Scale-specific offsets keep
-  // the body visually centered in the active zone:
-  //   s=1 (peek):  top of the 0..100 peek strip → 60
-  //   s=2 (home):  upper half of the 0..220 buddy zone → 106
-  //   s=3 (home):  body is 5×24=120 px tall; shift up so it doesn't collide
-  //                with the HUD at y≈220
+  // yBase picks where the body's top line lands. Scales in use:
+  //   s=1  landscape-clock path (buddyRenderTo) — kept near BUDDY_Y_BASE
+  //   s=2  peek (info/pet pages) — body 5×16=80 px, fits the 0..100 strip
+  //   s=3  home — body 5×24=120 px, shifted up to clear the HUD at y≈220
   int yBase = (_scale >= 3) ? 70
-            : (_scale == 2) ? 106
+            : (_scale == 2) ? 10
             : BUDDY_Y_BASE;
   for (uint8_t i = 0; i < nLines; i++) {
     buddyPrintLine(lines[i], yBase + (yOffset + i * BUDDY_CHAR_H) * _scale, color, xOff);
@@ -159,7 +157,7 @@ static uint8_t lastDrawnSpecies = 0xFF;
 void buddyInvalidate() { lastDrawnState = 0xFF; }
 
 void buddySetPeek(bool peek) {
-  uint8_t s = peek ? 1 : 3;   // home=3× for a chunkier pet; peek stays 1×
+  uint8_t s = peek ? 2 : 3;   // home=3×, peek=2× — both chunkier than before
   if (s == _scale) return;
   _scale = s;
   buddyInvalidate();
@@ -199,11 +197,9 @@ void buddyTick(uint8_t personaState) {
   lastDrawnState = personaState;
   lastDrawnSpecies = currentSpeciesIdx;
 
-  // Clear the whole render strip — at 3× body ends at y≈190, at 2× ≈186, at 1× ≈112.
-  int stripH = (_scale >= 3) ? 210
-             : (_scale == 2) ? (BUDDY_Y_BASE + 5 * BUDDY_CHAR_H + 12) * 2
-             : (BUDDY_Y_BASE + 5 * BUDDY_CHAR_H + 12);
-  if (stripH > spr.height()) stripH = spr.height();
+  // Clear only the active zone — peek owns 0..100, home owns 0..210. Clearing
+  // further erases the info/pet content below.
+  int stripH = (_scale >= 3) ? 210 : 100;
   spr.fillRect(0, 0, BUDDY_CANVAS_W, stripH, BUDDY_BG);
 
   const Species* sp = SPECIES_TABLE[currentSpeciesIdx];

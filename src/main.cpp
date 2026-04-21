@@ -278,20 +278,17 @@ static void applyReset(uint8_t idx) {
   ESP.restart();
 }
 
-const int MENU_HINT_H = 22;
-static void drawMenuHints(const Palette& p, int mx, int mw, int hy,
-                          const char* downLbl = "A", const char* rightLbl = "B") {
+const int MENU_HINT_H = 18;
+static const int APPROVE_BTN_H = 56;
+
+static void drawMenuHints(const Palette& p, int mx, int mw, int hy) {
   spr.drawFastHLine(mx + 6, hy - 6, mw - 12, p.textDim);
-  spr.setTextSize(2);
+  spr.setTextSize(1);
   spr.setTextColor(p.textDim, PANEL);
-  int x = mx + 8;
-  spr.setCursor(x, hy); spr.print(downLbl);
-  x += strlen(downLbl) * 12 + 6;
-  spr.fillTriangle(x, hy + 2, x + 10, hy + 2, x + 5, hy + 12, p.textDim);
-  x = mx + mw / 2 + 6;
-  spr.setCursor(x, hy); spr.print(rightLbl);
-  x += strlen(rightLbl) * 12 + 6;
-  spr.fillTriangle(x, hy, x, hy + 12, x + 8, hy + 6, p.textDim);
+  const char* hint = "hold to close";
+  int tw = strlen(hint) * 6;
+  spr.setCursor(mx + (mw - tw) / 2, hy);
+  spr.print(hint);
 }
 
 static void drawSettings() {
@@ -324,7 +321,7 @@ static void drawSettings() {
     }
     spr.setTextSize(3);
   }
-  drawMenuHints(p, mx, mw, my + mh - 18, "Next", "Change");
+  drawMenuHints(p, mx, mw, my + mh - 14);
   spr.setTextSize(1);
 }
 
@@ -345,7 +342,7 @@ static void drawReset() {
     if (armed) spr.setTextColor(HOT, PANEL);
     spr.print(armed ? "really?" : resetItems[i]);
   }
-  drawMenuHints(p, mx, mw, my + mh - 18);
+  drawMenuHints(p, mx, mw, my + mh - 14);
   spr.setTextSize(1);
 }
 
@@ -381,7 +378,7 @@ void drawMenu() {
     spr.print(menuItems[i]);
     if (i == 4) spr.print(dataDemo() ? " on" : " off");
   }
-  drawMenuHints(p, mx, mw, my + mh - 18);
+  drawMenuHints(p, mx, mw, my + mh - 14);
   spr.setTextSize(1);
 }
 
@@ -494,11 +491,11 @@ void drawInfo() {
 
   } else if (infoPage == 1) {
     _infoHeader(p, y, "TOUCH", infoPage);
-    spr.setTextColor(p.text, p.bg);    ln("tap bottom");
-    spr.setTextColor(p.textDim, p.bg); ln(" next / approve");
+    spr.setTextColor(p.text, p.bg);    ln("tap screen");
+    spr.setTextColor(p.textDim, p.bg); ln(" next page");
     y += 4;
-    spr.setTextColor(p.text, p.bg);    ln("tap top");
-    spr.setTextColor(p.textDim, p.bg); ln(" page / deny");
+    spr.setTextColor(p.text, p.bg);    ln("tap item");
+    spr.setTextColor(p.textDim, p.bg); ln(" pick / confirm");
     y += 4;
     spr.setTextColor(p.text, p.bg);    ln("long press");
     spr.setTextColor(p.textDim, p.bg); ln(" menu on/off");
@@ -607,6 +604,7 @@ static uint8_t wrapInto(const char* in, char out[][40], uint8_t maxRows, uint8_t
 static void drawApproval() {
   const Palette& p = characterPalette();
   const int AREA = 140;
+  const int BTN_H = APPROVE_BTN_H;
   spr.fillRect(0, H - AREA, W, AREA, p.bg);
   spr.drawFastHLine(0, H - AREA, W, p.textDim);
 
@@ -625,31 +623,31 @@ static void drawApproval() {
 
   spr.setTextSize(2);
   spr.setTextColor(p.textDim, p.bg);
-  // At size 2 the panel fits ~19 chars with 6px margin; wrap longer hints.
   char line[20];
   int hlen = strlen(tama.promptHint);
   int shown = hlen > 19 ? 19 : hlen;
   memcpy(line, tama.promptHint, shown); line[shown] = 0;
-  spr.setCursor(6, H - AREA + 68);
+  spr.setCursor(6, H - AREA + 58);
   spr.print(line);
-  if (hlen > 19) {
-    int left = hlen - 19; if (left > 19) left = 19;
-    memcpy(line, tama.promptHint + 19, left); line[left] = 0;
-    spr.setCursor(6, H - AREA + 88);
-    spr.print(line);
-  }
 
+  // Two big touch buttons pinned to the bottom. Hit-testing in loop() uses
+  // the same rect — tap x<W/2 → approve, tap x>=W/2 → deny, only within the
+  // button strip so the info above stays non-interactive.
+  int btnY = H - BTN_H - 4;
   if (responseSent) {
     spr.setTextColor(p.textDim, p.bg);
-    spr.setCursor(6, H - 22);
-    spr.print("sent...");
+    spr.setTextDatum(MC_DATUM);
+    spr.setTextSize(3);
+    spr.drawString("sent", W / 2, btnY + BTN_H / 2);
+    spr.setTextDatum(TL_DATUM);
   } else {
-    spr.setTextColor(GREEN, p.bg);
-    spr.setCursor(6, H - 22);
-    spr.print("v approve");
-    spr.setTextColor(HOT, p.bg);
-    spr.setCursor(W - 86, H - 22);
-    spr.print("^ deny");
+    spr.fillRoundRect(4,       btnY, W / 2 - 6, BTN_H, 10, GREEN);
+    spr.fillRoundRect(W/2 + 2, btnY, W / 2 - 6, BTN_H, 10, HOT);
+    spr.setTextDatum(MC_DATUM);
+    spr.setTextSize(3);
+    spr.setTextColor(0x0000, GREEN); spr.drawString("OK", W / 4,     btnY + BTN_H / 2);
+    spr.setTextColor(0x0000, HOT);   spr.drawString("NO", 3 * W / 4, btnY + BTN_H / 2);
+    spr.setTextDatum(TL_DATUM);
   }
   spr.setTextSize(1);
 }
@@ -740,7 +738,8 @@ static void drawPetHowTo(const Palette& p) {
   ln(p.textDim, " drains slowly"); gap();
 
   ln(p.textDim, "idle 30s = off");
-  ln(p.textDim, "long press: menu");
+  ln(p.textDim, "tap = next page");
+  ln(p.textDim, "hold = menu");
   spr.setTextSize(1);
 }
 
@@ -818,14 +817,13 @@ void drawHUD() {
 // ───────────────────────────────────────────────────────────────────────────
 // Touch gesture decoder
 // ───────────────────────────────────────────────────────────────────────────
-// Physical buttons map to screen zones in panel coordinates (0..239×0..319):
-//   top band  (y <  110) → "B": next page / deny / confirm
-//   bot band  (y >= 210) → "A": next screen / approve / menu next-item
-//   middle    (else)     → used for long-press menu open/close
+// Pure coordinate-based touch — no "button A/B" zones. The dispatch routes
+// taps to specific UI regions (menu rows, approve/deny buttons, page areas)
+// using lastTapX/lastTapY in panel coords (0..239 × 0..319).
 //
-// Short tap = released within 500ms without moving much.
-// Long press = held > 600ms (fires once, suppresses short-tap).
-enum GestureKind { G_NONE, G_TAP_A, G_TAP_B, G_LONG };
+//   short tap: released within 500 ms without moving much → G_TAP
+//   long press: held > 600 ms → G_LONG (fires once, suppresses the tap)
+enum GestureKind { G_NONE, G_TAP, G_LONG };
 
 static uint32_t gDownMs       = 0;
 static uint32_t gLastSeenMs   = 0;
@@ -833,6 +831,8 @@ static bool     gHeld         = false;
 static bool     gLongFired    = false;
 static uint16_t gDownX        = 0;
 static uint16_t gDownY        = 0;
+static uint16_t lastTapX      = 0;
+static uint16_t lastTapY      = 0;
 
 static GestureKind pollGesture() {
   uint16_t x, y;
@@ -857,10 +857,36 @@ static GestureKind pollGesture() {
   if (gHeld && !have && now - gLastSeenMs > 100) {
     gHeld = false;
     if (!gLongFired && now - gDownMs < 500) {
-      return (gDownY >= 210) ? G_TAP_A : (gDownY < 110 ? G_TAP_B : G_TAP_A);
+      lastTapX = gDownX;
+      lastTapY = gDownY;
+      return G_TAP;
     }
   }
   return G_NONE;
+}
+
+// ── Menu hit testers ────────────────────────────────────────────────────────
+// Must mirror the row geometry in drawMenu / drawSettings / drawReset.
+static int hitMenu(int ty) {
+  int mh = 20 + MENU_N * 36 + MENU_HINT_H;
+  int my = (H - mh) / 2;
+  int firstY = my + 14;
+  int i = (ty - firstY) / 36;
+  return (i >= 0 && i < MENU_N) ? i : -1;
+}
+static int hitSettings(int ty) {
+  int mh = 16 + SETTINGS_N * 28 + MENU_HINT_H;
+  int my = (H - mh) / 2;
+  int firstY = my + 10;
+  int i = (ty - firstY) / 28;
+  return (i >= 0 && i < SETTINGS_N) ? i : -1;
+}
+static int hitReset(int ty) {
+  int mh = 20 + RESET_N * 36 + MENU_HINT_H;
+  int my = (H - mh) / 2;
+  int firstY = my + 14;
+  int i = (ty - firstY) / 36;
+  return (i >= 0 && i < RESET_N) ? i : -1;
 }
 
 void setup() {
@@ -970,46 +996,47 @@ void loop() {
       menuSel = 0;
       if (!menuOpen) characterInvalidate();
     }
-  } else if (g == G_TAP_A) {
+  } else if (g == G_TAP) {
+    int tx = lastTapX, ty = lastTapY;
+
     if (inPrompt) {
-      char cmd[96];
-      snprintf(cmd, sizeof(cmd), "{\"cmd\":\"permission\",\"id\":\"%s\",\"decision\":\"once\"}", tama.promptId);
-      sendCmd(cmd);
-      responseSent = true;
-      uint32_t tookS = (millis() - promptArrivedMs) / 1000;
-      statsOnApproval(tookS);
-      if (tookS < 5) triggerOneShot(P_HEART, 2000);
+      // Only the two button rectangles at the bottom fire — the info area
+      // above them is non-interactive, so an accidental tap near the top
+      // doesn't approve or deny.
+      if (ty >= H - APPROVE_BTN_H - 4 && ty <= H - 4) {
+        bool approve = tx < W / 2;
+        char cmd[96];
+        snprintf(cmd, sizeof(cmd),
+                 "{\"cmd\":\"permission\",\"id\":\"%s\",\"decision\":\"%s\"}",
+                 tama.promptId, approve ? "once" : "deny");
+        sendCmd(cmd);
+        responseSent = true;
+        if (approve) {
+          uint32_t tookS = (millis() - promptArrivedMs) / 1000;
+          statsOnApproval(tookS);
+          if (tookS < 5) triggerOneShot(P_HEART, 2000);
+        } else {
+          statsOnDenial();
+        }
+      }
     } else if (resetOpen) {
-      resetSel = (resetSel + 1) % RESET_N;
-      resetConfirmIdx = 0xFF;
+      int r = hitReset(ty);
+      if (r >= 0) { resetSel = r; applyReset(r); }
     } else if (settingsOpen) {
-      settingsSel = (settingsSel + 1) % SETTINGS_N;
+      int r = hitSettings(ty);
+      if (r >= 0) { settingsSel = r; applySetting(r); }
     } else if (menuOpen) {
-      menuSel = (menuSel + 1) % MENU_N;
-    } else {
-      displayMode = (displayMode + 1) % DISP_COUNT;
-      applyDisplayMode();
-    }
-  } else if (g == G_TAP_B) {
-    if (inPrompt) {
-      char cmd[96];
-      snprintf(cmd, sizeof(cmd), "{\"cmd\":\"permission\",\"id\":\"%s\",\"decision\":\"deny\"}", tama.promptId);
-      sendCmd(cmd);
-      responseSent = true;
-      statsOnDenial();
-    } else if (resetOpen) {
-      applyReset(resetSel);
-    } else if (settingsOpen) {
-      applySetting(settingsSel);
-    } else if (menuOpen) {
-      menuConfirm();
+      int r = hitMenu(ty);
+      if (r >= 0) { menuSel = r; menuConfirm(); }
     } else if (displayMode == DISP_INFO) {
       infoPage = (infoPage + 1) % INFO_PAGES;
     } else if (displayMode == DISP_PET) {
       petPage = (petPage + 1) % PET_PAGES;
       applyDisplayMode();
     } else {
-      msgScroll = (msgScroll >= 30) ? 0 : msgScroll + 1;
+      // Home tap cycles the display modes (normal → pet → info → normal).
+      displayMode = (displayMode + 1) % DISP_COUNT;
+      applyDisplayMode();
     }
   }
 
