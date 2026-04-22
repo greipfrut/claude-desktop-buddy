@@ -197,6 +197,15 @@ void applyDisplayMode() {
   characterInvalidate();
 }
 
+// Force a full-screen redraw after closing an overlay. characterInvalidate()
+// is a no-op when no gif character is loaded (e.g. buddy mode), so the
+// overlay's pixels would otherwise persist in the sprite buffer.
+static void redrawAll() {
+  spr.fillSprite(characterPalette().bg);
+  characterInvalidate();
+  if (buddyMode) buddyInvalidate();
+}
+
 const char* menuItems[] = { "settings", "turn off", "help", "about", "demo", "close" };
 const uint8_t MENU_N = 6;
 
@@ -228,7 +237,7 @@ static void applySetting(uint8_t idx) {
     case 5: s.hud = !s.hud; break;
     case 6: nextPet(); return;
     case 7: resetOpen = true; resetSel = 0; resetConfirmIdx = 0xFF; return;
-    case 8: settingsOpen = false; characterInvalidate(); return;
+    case 8: settingsOpen = false; redrawAll(); return;
   }
   settingsSave();
 }
@@ -237,7 +246,7 @@ static void applyReset(uint8_t idx) {
   uint32_t now = millis();
   bool armed = (resetConfirmIdx == idx) && (int32_t)(now - resetConfirmUntil) < 0;
 
-  if (idx == 2) { resetOpen = false; return; }
+  if (idx == 2) { resetOpen = false; redrawAll(); return; }
 
   if (!armed) {
     resetConfirmIdx = idx;
@@ -366,7 +375,7 @@ void menuConfirm() {
       characterInvalidate();
       break;
     case 4: dataSetDemo(!dataDemo()); break;
-    case 5: menuOpen = false; characterInvalidate(); break;
+    case 5: menuOpen = false; redrawAll(); break;
   }
 }
 
@@ -1004,7 +1013,7 @@ void loop() {
     settingsOpen = false;
     displayMode = DISP_INFO;
     infoPage = 4;
-    characterInvalidate();
+    redrawAll();
     wake();
     Serial.println("[ui] pair triggered");
   }
@@ -1045,12 +1054,12 @@ void loop() {
   }
 
   if (g == G_LONG) {
-    if (resetOpen) { resetOpen = false; }
-    else if (settingsOpen) { settingsOpen = false; characterInvalidate(); }
+    if (resetOpen) { resetOpen = false; redrawAll(); }
+    else if (settingsOpen) { settingsOpen = false; redrawAll(); }
     else {
       menuOpen = !menuOpen;
       menuSel = 0;
-      if (!menuOpen) characterInvalidate();
+      if (!menuOpen) redrawAll();
     }
   } else if (g == G_TAP) {
     int tx = lastTapX, ty = lastTapY;
