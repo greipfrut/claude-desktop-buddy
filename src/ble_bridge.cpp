@@ -27,6 +27,8 @@ static BLECharacteristic* txChar = nullptr;
 static BLECharacteristic* rxChar = nullptr;
 static volatile bool      connected = false;
 static volatile bool      secure = false;
+static volatile bool      advertising = false;
+static volatile bool      autoAdvertise = true;
 static volatile uint32_t  passkey = 0;
 static volatile uint16_t  mtu = 23;
 
@@ -57,8 +59,13 @@ class ServerCallbacks : public BLEServerCallbacks {
     passkey = 0;
     mtu = 23;
     Serial.println("[ble] disconnected");
-    // Restart advertising so the next client can find us.
-    BLEDevice::startAdvertising();
+    // Only resume advertising when the bt setting is on.
+    // bleStopAdvertising() sets autoAdvertise=false so turning bt off
+    // doesn't get overridden by this reconnect attempt.
+    if (autoAdvertise) {
+      BLEDevice::startAdvertising();
+      advertising = true;
+    }
   }
   void onMtuChanged(BLEServer*, esp_ble_gatts_cb_param_t* param) override {
     mtu = param->mtu.mtu;
@@ -130,6 +137,7 @@ void bleInit(const char* deviceName) {
   adv->setMinPreferred(0x06);   // iOS-friendly connection interval
   adv->setMaxPreferred(0x12);
   BLEDevice::startAdvertising();
+  advertising = true;
   Serial.printf("[ble] advertising as '%s'\n", deviceName);
 }
 
@@ -147,6 +155,26 @@ void bleClearBonds() {
   free(list);
   Serial.printf("[ble] cleared %d bond(s)\n", n);
 }
+
+void bleStopAdvertising() {
+  BLEDevice::getAdvertising()->stop();
+  advertising = false;
+  autoAdvertise = false;
+  Serial.println("[ble] stopped advertising");
+}
+
+void bleStartAdvertising() {
+  BLEDevice::startAdvertising();
+  advertising = true;
+  autoAdvertise = true;
+  Serial.println("[ble] started advertising");
+}
+
+void bleDisconnect() {
+  if (server && connected) server->disconnect(server->getConnId());
+}
+
+bool bleIsAdvertising() { return advertising; }
 
 size_t bleAvailable() {
   return (rxHead + RX_CAP - rxTail) % RX_CAP;

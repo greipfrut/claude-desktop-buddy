@@ -201,6 +201,8 @@ inline bool xferCommand(JsonDocument& doc) {
     _xExpected = doc["size"] | 0;
     _xWritten = 0;
     if (!path) { _xAck("file", false); return true; }
+    // Reject path traversal and absolute paths (REFERENCE.md requirement).
+    if (strstr(path, "..") || path[0] == '/') { _xAck("file", false); return true; }
     char full[80]; snprintf(full, sizeof(full), "/characters/%s/%s", _xCharName, path);
     _xFile = LittleFS.open(full, "w");
     _xAck("file", (bool)_xFile);

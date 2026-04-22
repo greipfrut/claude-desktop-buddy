@@ -121,7 +121,6 @@ unsigned long t = 0;
 // Menu
 bool    menuOpen    = false;
 uint8_t menuSel     = 0;
-uint8_t brightLevel = 2;                  // 0..4 → 20..100%
 
 enum DisplayMode { DISP_NORMAL, DISP_PET, DISP_INFO, DISP_COUNT };
 uint8_t displayMode = DISP_NORMAL;
@@ -160,7 +159,7 @@ uint32_t promptArrivedMs = 0;
 
 static void applyBrightness() {
   static const uint8_t LVLS[] = { 20, 40, 60, 80, 100 };
-  Set_Backlight(LVLS[brightLevel]);
+  Set_Backlight(LVLS[settings().bright]);
 }
 
 static void wake() {
@@ -174,6 +173,7 @@ static void wake() {
 }
 
 bool responseSent = false;
+static bool lastBtSetting = true;
 
 // No buzzer on this board — beep() is a stub so call sites don't branch.
 static void beep(uint16_t, uint16_t) {}
@@ -202,7 +202,7 @@ const uint8_t MENU_N = 6;
 
 bool    settingsOpen = false;
 uint8_t settingsSel  = 0;
-const char* settingsItems[] = { "bright", "sound", "bt", "wifi", "led", "hud", "pet", "reset", "back" };
+const char* settingsItems[] = { "bright", "sound", "bt", "pair", "led", "hud", "pet", "reset", "back" };
 const uint8_t SETTINGS_N = 9;
 
 bool    resetOpen = false;
@@ -212,16 +212,18 @@ const uint8_t RESET_N = 3;
 static uint32_t resetConfirmUntil = 0;
 static uint8_t  resetConfirmIdx = 0xFF;
 
+static bool pairTrigger = false;
+
 static void applySetting(uint8_t idx) {
   Settings& s = settings();
   switch (idx) {
     case 0:
-      brightLevel = (brightLevel + 1) % 5;
+      s.bright = (s.bright + 1) % 5;
       applyBrightness();
-      return;
+      break;
     case 1: s.sound = !s.sound; break;
     case 2: s.bt = !s.bt; break;
-    case 3: s.wifi = !s.wifi; break;
+    case 3: pairTrigger = true; return;
     case 4: s.led = !s.led; break;
     case 5: s.hud = !s.hud; break;
     case 6: nextPet(); return;
@@ -299,7 +301,7 @@ static void drawSettings() {
   spr.drawRoundRect(mx, my, mw, mh, 8, p.textDim);
   spr.setTextSize(3);
   Settings& s = settings();
-  bool vals[] = { s.sound, s.bt, s.wifi, s.led, s.hud };
+  bool vals[] = { s.sound, s.bt, s.led, s.hud };
   for (int i = 0; i < SETTINGS_N; i++) {
     bool sel = (i == settingsSel);
     spr.setTextColor(sel ? p.text : p.textDim, PANEL);
@@ -310,10 +312,15 @@ static void drawSettings() {
     spr.setCursor(mx + mw - 64, my + 16 + i * 28);
     spr.setTextColor(p.textDim, PANEL);
     if (i == 0) {
-      spr.printf("%u/4", brightLevel);
-    } else if (i >= 1 && i <= 5) {
-      spr.setTextColor(vals[i-1] ? GREEN : p.textDim, PANEL);
-      spr.print(vals[i-1] ? " on" : "off");
+      spr.printf("%u/4", settings().bright);
+    } else if (i == 3) {
+      if (!s.bt) { spr.setTextColor(p.textDim, PANEL); spr.print("off"); }
+      else if (bleConnected()) { spr.setTextColor(GREEN, PANEL); spr.print(" ok"); }
+      else { spr.setTextColor(HOT, PANEL); spr.print(" go"); }
+    } else if (i == 1 || i == 2 || i == 4 || i == 5) {
+      int vi = (i <= 2) ? i - 1 : i - 2;
+      spr.setTextColor(vals[vi] ? GREEN : p.textDim, PANEL);
+      spr.print(vals[vi] ? " on" : "off");
     } else if (i == 6) {
       uint8_t total = buddySpeciesCount() + (gifAvailable ? 1 : 0);
       uint8_t pos   = buddyMode ? buddySpeciesIdx() + 1 : total;
@@ -536,25 +543,41 @@ void drawInfo() {
     uint32_t up = millis() / 1000;
     ln(" up %luh%02lum", up / 3600, (up / 60) % 60);
     ln(" heap %uK", ESP.getFreeHeap() / 1024);
-    ln(" bt %s", settings().bt ? (dataBtActive() ? "link" : "on") : "off");
+    ln(" bt %s", !settings().bt ? "off" : (bleConnected() ? (bleSecure() ? "sec" : "open") : "advt"));
 
   } else if (infoPage == 4) {
     _infoHeader(p, y, "BLUETOOTH", infoPage);
-    bool linked = settings().bt && dataBtActive();
+    bool btOn = settings().bt;
+    bool linked = btOn && bleConnected();
+    bool sec = linked && bleSecure();
+    bool pairing = btOn && blePasskey() != 0;
 
     spr.setTextSize(3);
-    spr.setTextColor(linked ? GREEN : (settings().bt ? HOT : p.textDim), p.bg);
-    spr.setCursor(6, y);
-    spr.print(linked ? "linked" : (settings().bt ? "pair" : "off"));
+    if (!btOn) {
+      spr.setTextColor(p.textDim, p.bg);
+      spr.setCursor(6, y); spr.print("off");
+    } else if (pairing) {
+      spr.setTextColor(HOT, p.bg);
+      spr.setCursor(6, y); spr.print("pairing");
+    } else if (sec) {
+      spr.setTextColor(GREEN, p.bg);
+      spr.setCursor(6, y); spr.print("secure");
+    } else if (linked) {
+      spr.setTextColor(HOT, p.bg);
+      spr.setCursor(6, y); spr.print("open");
+    } else {
+      spr.setTextColor(p.textDim, p.bg);
+      spr.setCursor(6, y); spr.print("ready");
+    }
     spr.setTextSize(2);
     y += 28;
 
-    spr.setTextColor(p.text, p.bg);    ln(" %s", btName);
+    spr.setTextColor(p.text, p.bg); ln(" %s", btName);
     spr.setTextColor(p.textDim, p.bg);
-    if (linked) {
+    if (sec) {
       uint32_t age = (millis() - tama.lastUpdated) / 1000;
       ln(" %lus ago", (unsigned long)age);
-    } else if (settings().bt) {
+    } else if (btOn && !pairing) {
       ln(" Open Claude");
       ln(" desktop app");
     }
@@ -906,12 +929,14 @@ void setup() {
   if (!LittleFS.begin(true)) Serial.println("LittleFS mount failed");
 
   startBt();
-  applyBrightness();
   lastInteractMs = millis();
   statsLoad();
   settingsLoad();
+  applyBrightness();
   petNameLoad();
   buddyInit();
+  lastBtSetting = settings().bt;
+  if (!settings().bt) bleStopAdvertising();
 
   characterInit(nullptr);
   gifAvailable = characterLoaded();
@@ -952,6 +977,37 @@ void loop() {
   dataPoll(&tama);
   if (statsPollLevelUp()) triggerOneShot(P_CELEBRATE, 3000);
   baseState = derive(tama);
+
+  // ── BLE advertising control ──────────────────────────────────────────
+  bool btOn = settings().bt;
+  if (btOn != lastBtSetting) {
+    lastBtSetting = btOn;
+    if (btOn) {
+      bleStartAdvertising();
+    } else {
+      if (bleConnected()) bleDisconnect();
+      bleStopAdvertising();
+    }
+  }
+
+  // ── Pair action ──────────────────────────────────────────────────
+  if (pairTrigger) {
+    pairTrigger = false;
+    if (!settings().bt) {
+      settings().bt = true;
+      lastBtSetting = true;
+      settingsSave();
+    }
+    if (bleConnected()) bleDisconnect();
+    bleClearBonds();
+    if (!bleIsAdvertising()) bleStartAdvertising();
+    settingsOpen = false;
+    displayMode = DISP_INFO;
+    infoPage = 4;
+    characterInvalidate();
+    wake();
+    Serial.println("[ui] pair triggered");
+  }
 
   if (baseState == P_IDLE && (int32_t)(now - wakeTransitionUntil) < 0) baseState = P_SLEEP;
   if ((int32_t)(now - oneShotUntil) >= 0) activeState = baseState;
