@@ -5,9 +5,23 @@
 #include <Arduino_GFX_Library.h>
 
 // ── Color constant aliases ─────────────────────────────────────────────
-// TFT_eSPI defines TFT_BLACK etc. Arduino_GFX defines BLACK etc.
-// Only TFT_BLACK is actually used in the codebase, but define the common
-// set for safety.
+// TFT_eSPI uses TFT_BLACK etc. Arduino_GFX uses RGB565_BLACK etc.
+// Map both the TFT_* names and the bare names used in the codebase.
+#ifndef BLACK
+#define BLACK       0x0000
+#endif
+#ifndef WHITE
+#define WHITE       0xFFFF
+#endif
+#ifndef RED
+#define RED         0xF800
+#endif
+#ifndef GREEN
+#define GREEN       0x07E0
+#endif
+#ifndef BLUE
+#define BLUE        0x001F
+#endif
 #ifndef TFT_BLACK
 #define TFT_BLACK   BLACK
 #endif

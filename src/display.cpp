@@ -1,4 +1,5 @@
 #include "display.h"
+#include "compat.h"
 #include <Wire.h>
 
 // ── Hardware objects ───────────────────────────────────────────────────

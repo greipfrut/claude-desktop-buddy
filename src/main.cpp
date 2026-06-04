@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
+#include <esp_mac.h>
 #include <FS.h>
 #include <LittleFS.h>
 #include <stdarg.h>
@@ -65,8 +66,7 @@ static void blit() {
 // Colors shared across UI surfaces
 const uint16_t HOT   = 0xFA20;   // red-orange: warnings, impatience, deny
 const uint16_t PANEL = 0x2104;   // overlay panel background
-const uint16_t GREEN = 0x07E0;
-const uint16_t RED   = 0xF800;
+// GREEN (0x07E0) and RED (0xF800) are defined as macros in compat.h
 
 enum PersonaState { P_SLEEP, P_IDLE, P_BUSY, P_ATTENTION, P_CELEBRATE, P_DIZZY, P_HEART };
 const char* stateNames[] = { "sleep", "idle", "busy", "attention", "celebrate", "dizzy", "heart" };
