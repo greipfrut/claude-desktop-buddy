@@ -11,9 +11,18 @@ port stubbed out:
 
 1. **Audio beeps** via the ES8311 DAC + speaker — restore the sound feedback
    the original M5StickC build had (approval/deny/navigation/notification
-   chirps), gated by the existing `settings().sound` toggle.
+   chirps), with a new **adjustable volume** (off + 4 levels) and a
+   **square/sine waveform toggle** so the user can pick the tone character by
+   ear.
 2. **IMU gestures** via the QMI8658 6-axis sensor — re-enable shake→dizzy and
-   face-down→nap, ported from the original M5 (MPU6886) implementation.
+   face-down→nap, ported from the original M5 (MPU6886) implementation, behind
+   a new **gesture on/off toggle**.
+
+Three new user settings (volume, waveform, gestures) are added to the settings
+menu. Because the menu is a fixed-height list on the 240×320 canvas with a
+practical ceiling of ~10 rows, volume and waveform live in a new **Audio
+submenu** (reached from the existing `sound` row, reusing the `reset`-submenu
+pattern), and `gesture` becomes one new top-level toggle row.
 
 Both are built as small, self-contained driver modules (`audio.*`, `imu.*`)
 with narrow public APIs that `main.cpp` drives — the same structural pattern as
@@ -26,6 +35,13 @@ stack, and data/stats layers are untouched.
   **never called** — the port stripped all original call sites.
 - `settings().sound` (persisted as `s_snd`, default `true`) still exists and is
   wired into the settings menu (`main.cpp:192`), but currently controls nothing.
+  It is **replaced** by `settings().volume` (level 0-4; 0 = off) — `beep()` is
+  gated on `volume > 0`, so the old binary mute folds into level 0.
+- `drawSettings()` (`main.cpp:264`) renders the value column with brittle
+  hardcoded index arithmetic (`vi = (i <= 2) ? i - 1 : i - 2`). Inserting the
+  new `gesture` row shifts every index, so that value-column logic is reworked
+  into a per-item `switch` keyed off the item rather than fragile offsets — a
+  targeted cleanup scoped to this change.
 - The original M5 build called `beep()` at ~12 sites and had two IMU gestures
   (`checkShake()`, `isFaceDown()`); all of that was removed during the port.
 - `SensorQMI8658` ships inside `lewisxhe/SensorLib`, which is **already a
@@ -75,16 +91,24 @@ void beep(uint16_t freq, uint16_t dur); // enqueue a tone; returns immediately
 - A FreeRTOS task (`audio_task`), pinned to core 1, owns the I2S peripheral and
   blocks on a small FreeRTOS queue (`QueueHandle_t`, depth ~4) of `{freq, dur}`
   jobs.
-- `beep(freq, dur)` checks `settings().sound`; if enabled, performs a
+- `beep(freq, dur)` checks `settings().volume > 0`; if audible, performs a
   **non-blocking** `xQueueSend` with zero timeout and returns. If the queue is
   full the beep is dropped (back-pressure) — `beep()` never blocks the render
   loop. This is the design decision that prevents the ~4-dropped-frame stall a
   blocking 60 ms I2S write would cause at 60 fps.
-- The task, per job, synthesizes a **square wave**: half-period in samples =
-  `sampleRate / (2 * freq)`, amplitude a fixed moderate level, total samples =
-  `sampleRate * dur / 1000`. It writes the buffer to I2S (this blocks the *task*,
-  not the loop), then writes a short silence tail so the amp settles, and loops
-  back to wait for the next job.
+- The task, per job, snapshots `settings().volume` and `settings().sineWave` and
+  synthesizes the tone over `sampleRate * dur / 1000` samples:
+  - **Square wave** (`sineWave == false`): output alternates `±amp` every
+    half-period (`sampleRate / (2 * freq)` samples). Cheap, punchy, closest to
+    the original piezo character.
+  - **Sine wave** (`sineWave == true`): `amp * sinf(2π * freq * n / sampleRate)`
+    per sample. Softer tone.
+  - `amp` scales with volume level so loudness is controlled purely in the
+    synthesized PCM (no per-beep I2C to the codec). The ES8311 voice volume is
+    set once at init to a fixed high value; the four volume levels map to
+    amplitude fractions of full-scale int16 (e.g. ~0.15 / 0.35 / 0.6 / 1.0).
+  - It writes the buffer to I2S (blocking the *task*, not the loop), then writes
+    a short silence tail so the amp settles, and loops back for the next job.
 - Sample rate 16 kHz (matches demo). Nyquist (8 kHz) comfortably covers the
   highest beep (2400 Hz).
 
@@ -105,7 +129,7 @@ If any step fails, log to serial and leave `beep()` a safe no-op (audio absent
 must never crash the buddy).
 
 **Re-added call sites** (faithful to the original; all gated inside `beep()` by
-`settings().sound`):
+`settings().volume > 0`):
 
 | Event | Tone (freq, dur) | Location |
 |---|---|---|
@@ -116,6 +140,52 @@ must never crash the buddy).
 | Long-press menu toggle | 800 Hz, 60 ms | `G_LONG` branch (`main.cpp:999`) |
 | BLE passkey shown | 1800 Hz, 60 ms | passkey-display block |
 | Shake → dizzy | 1200 Hz, 60 ms | shake gesture (Feature 2) |
+
+### Settings & UI
+
+**New `Settings` fields** (`stats.h`), replacing `bool sound`:
+
+| Field | Type | Default | NVS key | Meaning |
+|---|---|---|---|---|
+| `volume` | `uint8_t` | 3 | `s_vol` | 0 = off, 1-4 = louder |
+| `sineWave` | `bool` | `false` | `s_wav` | false = square, true = sine |
+| `gestures` | `bool` | `true` | `s_gst` | shake + face-down enabled |
+
+`statsLoad`/`settingsSave` gain the three keys; the obsolete `s_snd` key is
+dropped.
+
+**Top-level menu** — `settingsItems[]` becomes (10 rows, fits the 320px height):
+
+```
+{ "bright", "sound", "gesture", "bt", "pair", "led", "hud", "pet", "reset", "back" }
+```
+
+- `sound` row no longer toggles; tapping it opens the Audio submenu
+  (`audioOpen = true`), exactly as `reset` opens the reset submenu. Its value
+  column shows the current volume (`"off"` or `"n/4"`).
+- `gesture` row is a plain on/off toggle of `settings().gestures`, rendered like
+  `led`/`hud`.
+- `drawSettings()`'s value column is reworked from index arithmetic to a
+  `switch` keyed on the item so adding/removing rows no longer requires
+  recomputing offsets.
+
+**Audio submenu** — mirrors the existing `reset` submenu machinery
+(`audioOpen`/`audioSel`, `audioItems[]`, `applyAudio()`, `drawAudio()`,
+`hitAudio()`):
+
+```
+audioItems[] = { "volume", "wave", "back" }
+```
+
+- `volume`: cycles `0→1→2→3→4→0` (like `bright`); value column shows `off` /
+  `n/4`.
+- `wave`: toggles square ↔ sine; value column shows `sqr` / `sin`.
+- After changing `volume` (to a non-zero level) or `wave`, immediately call
+  `beep(1800, 80)` so the user hears the new setting — this is the by-ear
+  comparison the waveform toggle is for. Setting volume to 0 stays silent.
+- `back`: closes the submenu, returns to the top-level settings list.
+
+`settingsSave()` is called after each change, as with the other settings.
 
 ### Feature 2: IMU gestures (`imu.h` / `imu.cpp`)
 
@@ -141,7 +211,8 @@ bool isFaceDown();                              // z-axis dominant and negative
 
 **Gesture state machine in `main.cpp` loop** (polled every ~50 ms via a
 `lastImuCheck` gate, matching the original cadence and avoiding I2C contention
-with touch reads):
+with touch reads). The whole block is skipped when `settings().gestures` is
+off (and any active nap is released so the buddy doesn't get stuck asleep):
 
 - **Shake → dizzy:** when `checkShake()` and not (`menuOpen || screenOff`) and no
   one-shot active → `triggerOneShot(P_DIZZY, 2000)` and `beep(1200, 60)`.
@@ -165,8 +236,9 @@ almost certainly differs from the M5StickC's MPU6886, so axis signs and the
 empirical tuning on real hardware. This is an explicit on-device step in the
 implementation order, supported by temporary serial logging of raw ax/ay/az.
 
-**No new settings toggle:** gestures are always on, faithful to the original. A
-toggle can be added later if face-down nap proves annoying in practice.
+**Gesture toggle:** the new `settings().gestures` switch (default on) lets the
+user disable shake + face-down entirely — useful if face-down nap proves
+intrusive. See the Settings & UI section.
 
 ## File change map
 
@@ -188,13 +260,14 @@ toggle can be added later if face-down nap proves annoying in practice.
 |---|---|
 | `src/display.h` | Add `extern Arduino_XCA9554SWSPI *expander;` so audio can drive amp-enable pin 3 |
 | `src/display.cpp` | Ensure `expander` has external linkage (drop `static` if present) |
-| `src/main.cpp` | Remove `beep()` stub; `#include "audio.h"`/`"imu.h"`; call `audioInit()`/`imuInit()` in `setup()`; re-add ~12 `beep()` call sites; add nap/dizzy state machine + `napping` render guard |
+| `src/stats.h` | Replace `bool sound` with `uint8_t volume`, `bool sineWave`, `bool gestures`; update load/save (drop `s_snd`, add `s_vol`/`s_wav`/`s_gst`) |
+| `src/main.cpp` | Remove `beep()` stub; `#include "audio.h"`/`"imu.h"`; call `audioInit()`/`imuInit()` in `setup()`; re-add ~12 `beep()` call sites; add nap/dizzy state machine + `napping` render guard; add `gesture` top-level row; add Audio submenu (`audioOpen`/`applyAudio`/`drawAudio`/`hitAudio`); rework `drawSettings()` value column off index arithmetic |
 | `platformio.ini` | Confirm `ESP_I2S` available (Arduino-ESP32 core); add vendored `src/*.c` to build if needed; no new lib deps (SensorLib already present) |
 
 ### Unchanged
 
-`ble_bridge.*`, `data.h`, `stats.h` (already has the `sound` setting), `xfer.h`,
-`clock.h`, `touch.*`, `character.*`, `buddy.*`, all `buddies/*.cpp`, GIF assets.
+`ble_bridge.*`, `data.h`, `xfer.h`, `clock.h`, `touch.*`, `character.*`,
+`buddy.*`, all `buddies/*.cpp`, GIF assets.
 
 ## Implementation order
 
@@ -202,17 +275,29 @@ toggle can be added later if face-down nap proves annoying in practice.
 
 1. Vendor `es8311.c/.h/_reg.h` into `src/`; fix include paths if needed
    (e.g. `freertos/FreeRTOS.h`).
-2. Write `audio.h` / `audio.cpp` (init, synth, task, queue).
+2. Write `audio.h` / `audio.cpp` (init, square+sine synth, volume scaling, task,
+   queue).
 3. Expose `expander` from `display.h`.
 4. `pio run` — compile clean.
 5. Flash; verify a single test beep at boot sounds through the speaker.
-6. Re-add all `beep()` call sites in `main.cpp`; verify each event sounds and
-   that toggling `settings().sound` off silences them.
+6. Re-add all `beep()` call sites in `main.cpp`; verify each event sounds.
 
-### Phase 2: IMU gestures (compile-first, then on-device tuning)
+### Phase 2: Settings & UI
+
+1. Update `stats.h`: replace `sound` with `volume`/`sineWave`/`gestures` and
+   their NVS keys.
+2. Add the `gesture` top-level row and rework `drawSettings()`'s value column.
+3. Add the Audio submenu (`audioOpen`/`audioSel`/`audioItems`/`applyAudio`/
+   `drawAudio`/`hitAudio`), with the sample beep on volume/wave change.
+4. `pio run` — compile clean; flash. Verify: volume off silences all beeps;
+   each level is audibly louder; the wave toggle changes tone character; the
+   sample beep plays on change.
+
+### Phase 3: IMU gestures (compile-first, then on-device tuning)
 
 1. Write `imu.h` / `imu.cpp`.
-2. Add init call + gesture state machine + nap render guard in `main.cpp`.
+2. Add init call + gesture state machine (gated on `settings().gestures`) +
+   nap render guard in `main.cpp`.
 3. `pio run` — compile clean.
 4. Flash; enable temporary serial logging of raw ax/ay/az.
 5. Tune face-down threshold and shake threshold against the 4B's actual mount
