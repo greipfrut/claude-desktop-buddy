@@ -1,32 +1,25 @@
 #pragma once
 #include <Arduino.h>
-#include <SPI.h>
+#include <Arduino_GFX_Library.h>
 
-#define LCD_WIDTH   240
-#define LCD_HEIGHT  320
+// ── Panel geometry ─────────────────────────────────────────────────────
+#define PANEL_WIDTH   480
+#define PANEL_HEIGHT  480
 
-#define SPIFreq                        80000000
-#define EXAMPLE_PIN_NUM_MISO           -1
-#define EXAMPLE_PIN_NUM_MOSI           45
-#define EXAMPLE_PIN_NUM_SCLK           40
-#define EXAMPLE_PIN_NUM_LCD_CS         42
-#define EXAMPLE_PIN_NUM_LCD_DC         41
-#define EXAMPLE_PIN_NUM_LCD_RST        39
+// Canvas (sprite) dimensions — matches the existing 240x320 UI
+#define LCD_WIDTH     240
+#define LCD_HEIGHT    320
 
-#define LCD_Backlight_PIN   5
-#define BL_PWM_CHANNEL      1
-#define BL_PWM_FREQ         20000
-#define BL_PWM_RES          10
+// Canvas offset to center 240x320 on the 480x480 panel
+#define CANVAS_OFF_X  ((PANEL_WIDTH  - LCD_WIDTH)  / 2)   // 120
+#define CANVAS_OFF_Y  ((PANEL_HEIGHT - LCD_HEIGHT) / 2)   // 80
 
-#define PWR_KEY_Input_PIN   6
-#define PWR_Control_PIN     7
+// ── Global display objects (defined in display.cpp) ────────────────────
+extern Arduino_XCA9554SWSPI *expander;
+extern Arduino_ESP32RGBPanel *rgbpanel;
+extern Arduino_RGB_Display *gfx;
+extern Arduino_Canvas *canvas;
 
-extern uint8_t LCD_Backlight;
-
-void PWR_Init(void);
-void Backlight_Init(void);
-void Set_Backlight(uint8_t Light);
-
-void LCD_Init(void);
-void LCD_SetCursor(uint16_t Xstart, uint16_t Ystart, uint16_t Xend, uint16_t Yend);
-void LCD_addWindow(uint16_t Xstart, uint16_t Ystart, uint16_t Xend, uint16_t Yend, uint16_t* color);
+// ── Public API ─────────────────────────────────────────────────────────
+void displayInit();          // full hardware init: I2C, expander, RGB panel, canvas
+void Set_Backlight(uint8_t pct);   // stub — always full brightness on 4B
