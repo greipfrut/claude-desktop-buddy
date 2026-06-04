@@ -1,10 +1,11 @@
 #include <Arduino.h>
-#include <TFT_eSPI.h>
+#include <Arduino_GFX_Library.h>
 #include <FS.h>
 #include <LittleFS.h>
 #include <stdarg.h>
 using fs::File;
 
+#include "compat.h"
 #include "display.h"
 #include "touch.h"
 #include "clock.h"
@@ -15,67 +16,32 @@ using fs::File;
 #include "stats.h"
 
 // ───────────────────────────────────────────────────────────────────────────
-// Sprite + panel geometry
+// Canvas + panel geometry
 // ───────────────────────────────────────────────────────────────────────────
-// Full-panel sprite — 240×320 pixels maps 1:1 to the ST7789 panel. Species
-// buddies center horizontally via BUDDY_X_CENTER=120; menus, info pages
-// and HUD all use W/H so they re-center themselves. The sprite buffer is
-// 150 KB, fits in internal SRAM alongside BLE/TFT/LittleFS allocations.
-const int W = LCD_WIDTH;    // 240
-const int H = LCD_HEIGHT;   // 320
+// The global `canvas` (Arduino_Canvas*) is created by displayInit() in
+// display.cpp. The macro below lets every existing `spr.method()` call
+// compile as `(*canvas).method()` without touching each call site.
+#define spr (*canvas)
+
+const int W = LCD_WIDTH;
+const int H = LCD_HEIGHT;
 const int CX = W / 2;
-const int SPR_X = 0;
-const int SPR_Y = 0;
-
-TFT_eSPI    tft;
-TFT_eSprite spr = TFT_eSprite(&tft);
 
 // ───────────────────────────────────────────────────────────────────────────
-// Battery + power helpers (Waveshare S3 Touch 2.8)
+// Battery + power stubs (Waveshare S3 Touch LCD 4B)
 // ───────────────────────────────────────────────────────────────────────────
-// The board has no AXP192 — battery voltage comes from an ADC divider on
-// GPIO8 (reference: Waveshare demo BAT_Driver.cpp), and "USB present" is
-// inferred by voltage above the nominal Li-Po range. Current is unknown,
-// so the status responder reports 0. Values are read lazily and cached
-// for 1s to keep I/O off the render loop.
-static constexpr int PIN_BAT_ADC = 8;
-static uint32_t _batLastReadMs = 0;
-static int      _batMV         = 0;
+// The 4B has an AXP2101 PMIC for battery management. For MVP, we stub
+// everything: always report full battery on USB. Real PMIC integration
+// is a future enhancement.
+int  batteryMilliVolts()    { return 4200; }
+int  batteryPercent()       { return 100; }
+int  batteryMilliAmps()     { return 0; }
+bool batteryUsbPresent()    { return true; }
+int  batteryUsbMilliVolts() { return 5000; }
 
-static void batteryRead() {
-  uint32_t now = millis();
-  if (_batMV && now - _batLastReadMs < 1000) return;
-  _batLastReadMs = now;
-  uint32_t raw = analogReadMilliVolts(PIN_BAT_ADC);
-  _batMV = (int)(raw * 3);    // external 1/3 divider on the demo reference
-}
-
-int batteryMilliVolts() { batteryRead(); return _batMV; }
-
-int batteryPercent() {
-  int mV = batteryMilliVolts();
-  int pct = (mV - 3200) / 10;
-  if (pct < 0) pct = 0;
-  if (pct > 100) pct = 100;
-  return pct;
-}
-
-int batteryMilliAmps() { return 0; }   // no shunt → unknown
-
-// USB-present heuristic: Li-Po tops out ~4.2V; anything higher means the
-// charger is pushing it (USB in). Same threshold the original used.
-bool batteryUsbPresent() { return batteryMilliVolts() > 4250; }
-int  batteryUsbMilliVolts() { return batteryUsbPresent() ? 5000 : 0; }
-
-// Soft-power latch — GPIO7 held HIGH by PWR_Init() during boot. Releasing
-// it drops the rail, mimicking M5.Axp.PowerOff() while on battery. On USB
-// the pin drop is harmless (the rail stays up through the USB 5V → LDO),
-// so "turn off" behaves like screen-off instead.
 static void powerOff() {
-  ledcWrite(BL_PWM_CHANNEL, 0);
-  digitalWrite(PWR_Control_PIN, LOW);
-  delay(500);
-  ESP.restart();   // on USB the latch doesn't cut power; reboot is the fallback
+  // AXP2101 power-off requires PMIC I2C commands. For MVP, just restart.
+  ESP.restart();
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -90,17 +56,10 @@ static void startBt() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// Push sprite → panel via byte-swap + LCD_addWindow
+// Push canvas → RGB panel via DMA flush
 // ───────────────────────────────────────────────────────────────────────────
-// TFT_eSprite stores 16-bit pixels in native (little-endian) order; the
-// ST7789 expects MSB-first. Swap in place, send, swap back so the buffer
-// stays consistent for the next drawing pass.
 static void blit() {
-  uint16_t* buf = (uint16_t*)spr.getPointer();
-  uint32_t n = (uint32_t)W * H;
-  for (uint32_t i = 0; i < n; i++) buf[i] = __builtin_bswap16(buf[i]);
-  LCD_addWindow(0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1, buf);
-  for (uint32_t i = 0; i < n; i++) buf[i] = __builtin_bswap16(buf[i]);
+  canvas->flush();
 }
 
 // Colors shared across UI surfaces
@@ -193,7 +152,7 @@ void applyDisplayMode() {
   bool peek = displayMode != DISP_NORMAL;
   characterSetPeek(peek);
   buddySetPeek(peek);
-  spr.fillSprite(0x0000);
+  spr.fillScreen(0x0000);
   characterInvalidate();
 }
 
@@ -201,7 +160,7 @@ void applyDisplayMode() {
 // is a no-op when no gif character is loaded (e.g. buddy mode), so the
 // overlay's pixels would otherwise persist in the sprite buffer.
 static void redrawAll() {
-  spr.fillSprite(characterPalette().bg);
+  spr.fillScreen(characterPalette().bg);
   characterInvalidate();
   if (buddyMode) buddyInvalidate();
 }
@@ -428,11 +387,9 @@ static void drawClock() {
 
   // Pet peek occupies y<100; clock owns 110..H.
   spr.fillRect(0, 110, W, H - 110, p.bg);
-  spr.setTextDatum(MC_DATUM);
-  spr.setTextSize(7); spr.setTextColor(p.text, p.bg);    spr.drawString(hm, CX, 170);
-  spr.setTextSize(4); spr.setTextColor(p.textDim, p.bg); spr.drawString(ss, CX, 230);
-  spr.setTextSize(3);                                     spr.drawString(dl, CX, 280);
-  spr.setTextDatum(TL_DATUM);
+  spr.setTextSize(7); spr.setTextColor(p.text, p.bg);    drawCenteredString(canvas, hm, CX, 170);
+  spr.setTextSize(4); spr.setTextColor(p.textDim, p.bg); drawCenteredString(canvas, ss, CX, 230);
+  spr.setTextSize(3);                                     drawCenteredString(canvas, dl, CX, 280);
   spr.setTextSize(1);
 }
 
@@ -463,7 +420,7 @@ static void _infoHeader(const Palette& p, int& y, const char* section, uint8_t p
 
 void drawPasskey() {
   const Palette& p = characterPalette();
-  spr.fillSprite(p.bg);
+  spr.fillScreen(p.bg);
   spr.setTextSize(3);
   spr.setTextColor(p.textDim, p.bg);
   // "BT PAIRING" = 10 chars × 18 = 180 px, centered
@@ -668,18 +625,14 @@ static void drawApproval() {
   int btnY = H - BTN_H - 4;
   if (responseSent) {
     spr.setTextColor(p.textDim, p.bg);
-    spr.setTextDatum(MC_DATUM);
     spr.setTextSize(3);
-    spr.drawString("sent", W / 2, btnY + BTN_H / 2);
-    spr.setTextDatum(TL_DATUM);
+    drawCenteredString(canvas, "sent", W / 2, btnY + BTN_H / 2);
   } else {
     spr.fillRoundRect(4,       btnY, W / 2 - 6, BTN_H, 10, GREEN);
     spr.fillRoundRect(W/2 + 2, btnY, W / 2 - 6, BTN_H, 10, HOT);
-    spr.setTextDatum(MC_DATUM);
     spr.setTextSize(3);
-    spr.setTextColor(0x0000, GREEN); spr.drawString("OK", W / 4,     btnY + BTN_H / 2);
-    spr.setTextColor(0x0000, HOT);   spr.drawString("NO", 3 * W / 4, btnY + BTN_H / 2);
-    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(0x0000, GREEN); drawCenteredString(canvas, "OK", W / 4,     btnY + BTN_H / 2);
+    spr.setTextColor(0x0000, HOT);   drawCenteredString(canvas, "NO", 3 * W / 4, btnY + BTN_H / 2);
   }
   spr.setTextSize(1);
 }
@@ -924,16 +877,7 @@ static int hitReset(int ty) {
 void setup() {
   Serial.begin(115200);
 
-  PWR_Init();
-  Backlight_Init();
-  LCD_Init();
-
-  spr.setColorDepth(16);
-  if (!spr.createSprite(W, H)) {
-    Serial.println("sprite alloc failed");
-  }
-  spr.fillSprite(TFT_BLACK);
-  blit();   // paint the full panel black once before first content
+  displayInit();    // I2C, expander, RGB panel, canvas — all in one call
 
   if (!LittleFS.begin(true)) Serial.println("LittleFS mount failed");
 
@@ -957,21 +901,20 @@ void setup() {
 
   {
     const Palette& p = characterPalette();
-    spr.fillSprite(p.bg);
-    spr.setTextDatum(MC_DATUM);
+    spr.fillScreen(p.bg);
     spr.setTextSize(4);
     if (ownerName()[0]) {
       char line[40];
       snprintf(line, sizeof(line), "%s's", ownerName());
-      spr.setTextColor(p.text, p.bg);   spr.drawString(line, W/2, H/2 - 24);
-      spr.setTextColor(p.body, p.bg);   spr.drawString(petName(), W/2, H/2 + 24);
+      spr.setTextColor(p.text, p.bg);   drawCenteredString(canvas, line, W/2, H/2 - 24);
+      spr.setTextColor(p.body, p.bg);   drawCenteredString(canvas, petName(), W/2, H/2 + 24);
     } else {
-      spr.setTextColor(p.body, p.bg);   spr.drawString("Hello!", W/2, H/2 - 24);
+      spr.setTextColor(p.body, p.bg);   drawCenteredString(canvas, "Hello!", W/2, H/2 - 24);
       spr.setTextSize(2);
       spr.setTextColor(p.textDim, p.bg);
-      spr.drawString("a buddy appears", W/2, H/2 + 20);
+      drawCenteredString(canvas, "a buddy appears", W/2, H/2 + 20);
     }
-    spr.setTextDatum(TL_DATUM); spr.setTextSize(1);
+    spr.setTextSize(1);
     blit();
     delay(1800);
   }
@@ -1148,7 +1091,7 @@ void loop() {
     characterTick();
   } else {
     const Palette& p = characterPalette();
-    spr.fillSprite(p.bg);
+    spr.fillScreen(p.bg);
     spr.setTextColor(p.textDim, p.bg);
     spr.setTextSize(2);
     if (xferActive()) {
@@ -1189,7 +1132,7 @@ void loop() {
   // Auto screen-off on battery only — while charging we leave the clock up.
   if (!screenOff && !inPrompt && !_onUsb
       && millis() - lastInteractMs > SCREEN_OFF_MS) {
-    ledcWrite(BL_PWM_CHANNEL, 0);
+    Set_Backlight(0);
     screenOff = true;
   }
 
