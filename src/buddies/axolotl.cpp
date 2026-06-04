@@ -1,9 +1,9 @@
 #include "../buddy.h"
 #include "../buddy_common.h"
-#include <TFT_eSPI.h>
+#include <Arduino_GFX_Library.h>
 #include <string.h>
 
-extern TFT_eSprite spr;
+extern Arduino_Canvas *canvas;
 
 namespace axolotl {
 
