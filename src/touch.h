@@ -1,8 +1,9 @@
 #pragma once
 #include <stdint.h>
 
-// CST328 capacitive touch driver for the Waveshare ESP32-S3 Touch LCD 2.8.
-// Wire1 I2C, pins SDA=1 SCL=3, INT=4, RST=2. Returns raw coords matching
-// the native portrait orientation (x 0..239, y 0..319).
+// GT911 capacitive touch driver for the Waveshare ESP32-S3-Touch-LCD-4B.
+// I2C on Wire (SDA=47, SCL=48), addr 0x5D. RST via XCA9554 pin 6.
+// Returns coordinates mapped to the 240x320 canvas space (NOT native
+// 480x480 panel coords). Touches outside the canvas region are rejected.
 bool touchInit();
 bool touchGetPoint(uint16_t* x, uint16_t* y);
