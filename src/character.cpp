@@ -1,12 +1,12 @@
 #include "character.h"
-#include <TFT_eSPI.h>
+#include <Arduino_GFX_Library.h>
 #include <FS.h>
 #include <LittleFS.h>
 #include <AnimatedGIF.h>
 #include <ArduinoJson.h>
 using fs::File;
 
-extern TFT_eSprite spr;
+extern Arduino_Canvas *canvas;
 
 static const char* STATE_NAMES[] = {
   "sleep", "idle", "busy", "attention", "celebrate", "dizzy", "heart"
@@ -50,21 +50,21 @@ static const int   PEEK_TOP = 100;
 static bool        peekMode = false;
 // Draw target — defaults to the sprite; characterRenderTo() retargets to
 // M5.Lcd for the landscape clock (both inherit TFT_eSPI).
-static TFT_eSPI*   _tgt = &spr;
+static Arduino_GFX*   _tgt = canvas;
 static void gifPlace() {
   int outW, outH;
   if (peekMode) {
     // Use native 1:1 when the GIF already fits the peek strip — preserves
     // the thicker look requested for detail pages.
-    peekIsHalf = !(gifH <= PEEK_TOP && gifW <= spr.width());
+    peekIsHalf = !(gifH <= PEEK_TOP && gifW <= canvas->width());
     outW = peekIsHalf ? gifW / 2 : gifW;
     outH = peekIsHalf ? gifH / 2 : gifH;
   } else {
-    homeScale = (gifW * 2 <= spr.width() && gifH * 2 <= 210) ? 2 : 1;
+    homeScale = (gifW * 2 <= canvas->width() && gifH * 2 <= 210) ? 2 : 1;
     outW = gifW * homeScale;
     outH = gifH * homeScale;
   }
-  gifX = (spr.width() - outW) / 2;
+  gifX = (canvas->width() - outW) / 2;
   gifY = peekMode ? (PEEK_TOP - outH) / 2 : (210 - outH) / 2;
 }
 static uint32_t    nextFrameAt = 0;
@@ -143,7 +143,7 @@ static void gifDrawCb(GIFDRAW* d) {
       int w  = d->iWidth;
       if (w > 256) w = 256;
       if (x0 < 0) { src -= x0; w += x0; x0 = 0; }
-      if (x0 + w > spr.width()) w = spr.width() - x0;
+      if (x0 + w > canvas->width()) w = canvas->width() - x0;
       if (w > 0) for (int i = 0; i < w; i++) put(x0 + i, y, src[i]);
     }
     return;
@@ -169,10 +169,10 @@ static void gifDrawCb(GIFDRAW* d) {
   }
 
   int y = gifY + srcY;
-  if (y < 0 || y >= spr.height()) return;
+  if (y < 0 || y >= canvas->height()) return;
   int x0 = gifX + d->iX;
   if (x0 < 0) { src -= x0; w += x0; x0 = 0; }
-  if (x0 + w > spr.width()) w = spr.width() - x0;
+  if (x0 + w > canvas->width()) w = canvas->width() - x0;
   if (w <= 0) return;
   for (int i = 0; i < w; i++) put(x0 + i, y, src[i]);
 }
@@ -292,9 +292,9 @@ const Palette& characterPalette() { return pal; }
 // One-shot half-scale render to an arbitrary surface (M5.Lcd for the
 // landscape clock). Caller owns clearing. Advances frame timing so
 // animation runs even when characterTick() is bypassed.
-void characterRenderTo(TFT_eSPI* tgt, int cx, int cy) {
+void characterRenderTo(Arduino_GFX* tgt, int cx, int cy) {
   if (!gifOpen) return;   // caller opens via characterSetState(activeState)
-  TFT_eSPI* prevT = _tgt; bool prevP = peekMode; int px = gifX, py = gifY;
+  Arduino_GFX* prevT = _tgt; bool prevP = peekMode; int px = gifX, py = gifY;
   _tgt = tgt; peekMode = true;
   gifX = cx - gifW / 4;
   gifY = cy - gifH / 4;
@@ -323,7 +323,7 @@ void characterClose() {
 void characterInvalidate() {
   if (!loaded) return;
   if (textMode) {
-    spr.fillSprite(pal.bg);
+    canvas->fillScreen(pal.bg);
     uint8_t s = curState; curState = 0xFF;
     characterSetState(s);
     return;
@@ -341,7 +341,7 @@ void characterSetState(uint8_t s) {
     curState = s;
     textFrame = 0;
     textNext = 0;
-    spr.fillSprite(pal.bg);
+    canvas->fillScreen(pal.bg);
     return;
   }
 
@@ -362,7 +362,7 @@ void characterSetState(uint8_t s) {
     gifW = gif.getCanvasWidth();
     gifH = gif.getCanvasHeight();
     gifPlace();
-    spr.fillSprite(pal.bg);   // bias upward, leave room for HUD
+    canvas->fillScreen(pal.bg);   // bias upward, leave room for HUD
     nextFrameAt = 0;
     variantStartedMs = millis();
     Serial.printf("[char] %s: %dx%d @ (%d,%d) heap=%u\n",
@@ -388,15 +388,15 @@ void characterTick() {
     int gh = sz * 8;
     int gw = sz * 6;
     int cy = peekMode ? 50 : 120;
-    spr.fillRect(0, cy - gh/2 - 4, spr.width(), gh + 8, pal.bg);
+    canvas->fillRect(0, cy - gh/2 - 4, canvas->width(), gh + 8, pal.bg);
 
     const char* line = ts.frames[textFrame];
     int len = strlen(line);
     int tw = len * gw;
-    spr.setTextColor(pal.body, pal.bg);
-    spr.setTextSize(sz);
-    spr.setCursor((spr.width() - tw) / 2, cy - gh/2);
-    spr.print(line);
+    canvas->setTextColor(pal.body, pal.bg);
+    canvas->setTextSize(sz);
+    canvas->setCursor((canvas->width() - tw) / 2, cy - gh/2);
+    canvas->print(line);
 
     textFrame = (textFrame + 1) % ts.nFrames;
     return;
