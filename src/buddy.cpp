@@ -37,7 +37,7 @@ const uint16_t BUDDY_BLUE   = 0x041F;
 // M5.Lcd for landscape clock mode (both inherit TFT_eSPI). Coords stay
 // fixed — species hardcode BUDDY_X_CENTER/BUDDY_Y_OVERLAY in their
 // particle calls, so retargeting position would only move the body.
-static Arduino_GFX* _tgt = canvas;
+static Arduino_GFX* _tgt = nullptr;  // set to canvas lazily; can't init from global ptr
 // 2× on home screen, 1× in peek (PET/INFO) and landscape clock. Species
 // art is space-padded to a fixed width for alignment at 1×; at 2× we trim
 // and re-center per line so the padding doesn't push ink off-screen.
@@ -181,6 +181,7 @@ void buddyRenderTo(Arduino_GFX* tgt, uint8_t personaState) {
 }
 
 void buddyTick(uint8_t personaState) {
+  if (!_tgt) _tgt = canvas;   // lazy init — canvas is null during static init
   uint32_t now = millis();
   bool ticked = false;
   if ((int32_t)(now - nextTickAt) >= 0) {

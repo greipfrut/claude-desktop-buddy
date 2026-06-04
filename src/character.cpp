@@ -50,7 +50,7 @@ static const int   PEEK_TOP = 100;
 static bool        peekMode = false;
 // Draw target — defaults to the sprite; characterRenderTo() retargets to
 // M5.Lcd for the landscape clock (both inherit TFT_eSPI).
-static Arduino_GFX*   _tgt = canvas;
+static Arduino_GFX*   _tgt = nullptr;  // set to canvas lazily; can't init from global ptr
 static void gifPlace() {
   int outW, outH;
   if (peekMode) {
@@ -373,6 +373,7 @@ void characterSetState(uint8_t s) {
 }
 
 void characterTick() {
+  if (!_tgt) _tgt = canvas;   // lazy init — canvas is null during static init
   if (!loaded) return;
 
   if (textMode) {
