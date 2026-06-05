@@ -535,8 +535,8 @@ void drawInfo() {
     int vBat_mV = batteryMilliVolts();
     int pct = batteryPercent();
     bool usb = batteryUsbPresent();
-    bool charging = usb && vBat_mV < 4100;
-    bool full = usb && vBat_mV >= 4100;
+    bool charging = batteryCharging();
+    bool full = batteryFull();
 
     spr.setTextSize(3);
     spr.setTextColor(p.text, p.bg);
@@ -937,6 +937,8 @@ void setup() {
 
   displayInit();    // I2C, expander, RGB panel, canvas — all in one call
   audioInit();      // ES8311 + I2S + speaker amp; beep() is a no-op until this runs
+  bool pmuOk = powerInit();   // AXP2101 battery/power; getters degrade safely if absent
+  Serial.printf("power init: %s\n", pmuOk ? "ok" : "failed");
 
   startBt();
   lastInteractMs = millis();
@@ -982,6 +984,9 @@ void setup() {
 void loop() {
   t++;
   uint32_t now = millis();
+
+  static uint32_t lastPowerPoll = 0;
+  if (now - lastPowerPoll > 3000) { lastPowerPoll = now; powerPoll(); }
 
   dataPoll(&tama);
   if (statsPollLevelUp()) triggerOneShot(P_CELEBRATE, 3000);
