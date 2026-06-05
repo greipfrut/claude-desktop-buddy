@@ -84,7 +84,6 @@ char     lastPromptId[40] = "";
 int      hintScroll = 0;
 int      transcriptScroll = 0;
 uint32_t lastInteractMs = 0;
-bool     dimmed = false;
 bool     screenOff = false;
 bool     buddyMode = false;
 bool     gifAvailable = false;
@@ -107,12 +106,18 @@ static void nextPet() {
 }
 
 uint32_t wakeTransitionUntil = 0;
-const uint32_t SCREEN_OFF_MS = 30000;
 uint32_t promptArrivedMs = 0;
 
+static const uint8_t BRIGHT_PCT[] = { 20, 40, 60, 80, 100 };
+static const uint32_t SCREEN_OFF_TIMES[] = { 0, 30000, 60000, 120000, 300000 };
+
 static void applyBrightness() {
-  static const uint8_t LVLS[] = { 20, 40, 60, 80, 100 };
-  Set_Backlight(LVLS[settings().bright]);
+  Set_Backlight(BRIGHT_PCT[settings().bright]);
+}
+
+static uint32_t screenOffDelay() {
+  uint8_t idx = settings().screenOff;
+  return (idx < 5) ? SCREEN_OFF_TIMES[idx] : 30000;
 }
 
 static void wake() {
@@ -122,7 +127,6 @@ static void wake() {
     screenOff = false;
     wakeTransitionUntil = millis() + 12000;
   }
-  if (dimmed) { applyBrightness(); dimmed = false; }
 }
 
 bool responseSent = false;
@@ -162,8 +166,8 @@ const uint8_t MENU_N = 6;
 
 bool    settingsOpen = false;
 uint8_t settingsSel  = 0;
-const char* settingsItems[] = { "bright", "sound", "gesture", "bt", "pair", "led", "hud", "pet", "reset", "back" };
-const uint8_t SETTINGS_N = 10;
+const char* settingsItems[] = { "bright", "sleep", "sound", "bt", "pair", "hud", "pet", "reset", "back" };
+const uint8_t SETTINGS_N = 9;
 
 bool    resetOpen = false;
 uint8_t resetSel  = 0;
@@ -183,15 +187,14 @@ static void applySetting(uint8_t idx) {
   Settings& s = settings();
   switch (idx) {
     case 0: s.bright = (s.bright + 1) % 5; applyBrightness(); break;
-    case 1: audioOpen = true; audioSel = 0; return;   // sound → Audio submenu
-    case 2: s.gestures = !s.gestures; break;
+    case 1: s.screenOff = (s.screenOff + 1) % 5; break;
+    case 2: audioOpen = true; audioSel = 0; return;
     case 3: s.bt = !s.bt; break;
     case 4: pairTrigger = true; return;
-    case 5: s.led = !s.led; break;
-    case 6: s.hud = !s.hud; break;
-    case 7: nextPet(); return;
-    case 8: resetOpen = true; resetSel = 0; resetConfirmIdx = 0xFF; return;
-    case 9: settingsOpen = false; redrawAll(); return;
+    case 5: s.hud = !s.hud; break;
+    case 6: nextPet(); return;
+    case 7: resetOpen = true; resetSel = 0; resetConfirmIdx = 0xFF; return;
+    case 8: settingsOpen = false; redrawAll(); return;
   }
   settingsSave();
 }
@@ -285,13 +288,16 @@ static void drawSettings() {
     spr.setCursor(mx + mw - 70, my + 18 + i * 36);
     spr.setTextColor(p.textDim, PANEL);
     switch (i) {
-      case 0: spr.printf("%u/4", s.bright); break;
-      case 1:
+      case 0: spr.printf("%u/5", s.bright + 1); break;
+      case 1: {
+        static const char* SOF_LABELS[] = { "off", " 30s", "  1m", "  2m", "  5m" };
+        spr.print(SOF_LABELS[s.screenOff]);
+        break;
+      }
+      case 2:
         if (s.volume == 0) spr.print("off");
         else               spr.printf("%u/4", s.volume);
         break;
-      case 2: spr.setTextColor(s.gestures ? GREEN : p.textDim, PANEL);
-              spr.print(s.gestures ? " on" : "off"); break;
       case 3: spr.setTextColor(s.bt ? GREEN : p.textDim, PANEL);
               spr.print(s.bt ? " on" : "off"); break;
       case 4:
@@ -299,11 +305,9 @@ static void drawSettings() {
         else if (bleConnected())    { spr.setTextColor(GREEN, PANEL); spr.print(" ok"); }
         else                        { spr.setTextColor(HOT, PANEL);   spr.print(" go"); }
         break;
-      case 5: spr.setTextColor(s.led ? GREEN : p.textDim, PANEL);
-              spr.print(s.led ? " on" : "off"); break;
-      case 6: spr.setTextColor(s.hud ? GREEN : p.textDim, PANEL);
+      case 5: spr.setTextColor(s.hud ? GREEN : p.textDim, PANEL);
               spr.print(s.hud ? " on" : "off"); break;
-      case 7: {
+      case 6: {
         uint8_t total = buddySpeciesCount() + (gifAvailable ? 1 : 0);
         uint8_t pos   = buddyMode ? buddySpeciesIdx() + 1 : total;
         spr.printf("%u/%u", pos, total);
@@ -898,10 +902,10 @@ static void drawStatusBars() {
   }
 
   // Lines 2-3: two most recent transcript entries (truncated to screen width)
-  const int MAX_BOTTOM_CHARS = (W - 16) / 12;  // 12px per char at textSize 2
+  const int MAX_BOTTOM_CHARS = (W - 16) / 12;
   char truncBuf[40];
   for (int i = 0; i < 2 && i < tama.nLines; i++) {
-    spr.setTextColor(i == 0 ? p.textDim : p.textDim, p.bg);
+    spr.setTextColor(p.textDim, p.bg);
     spr.setCursor(8, H - 56 + i * 20);
     int len = strlen(tama.lines[i]);
     if (len > MAX_BOTTOM_CHARS) {
@@ -963,7 +967,7 @@ static void drawTranscript() {
   const int WRAP_COLS = 37;
   spr.setTextSize(2);
 
-  // Calculate total height and render
+  // Calculate total height
   int totalH = 0;
   int lineHeights[8];
   for (int i = 0; i < tama.nLines; i++) {
@@ -982,11 +986,9 @@ static void drawTranscript() {
   int yy = BODY_Y - transcriptScroll;
   char wrapLine[48];
   for (int i = 0; i < tama.nLines; i++) {
-    // Color gradient: newest bright, oldest dim
     uint8_t fade = (tama.nLines > 1) ? (i * 255 / (tama.nLines - 1)) : 0;
     uint16_t col = (fade < 128) ? p.text : p.textDim;
 
-    // Left border accent
     int entryTop = yy;
     int entryBot = yy + lineHeights[i] - 6;
     if (entryBot > BODY_Y && entryTop < BODY_Y + BODY_H) {
@@ -995,7 +997,6 @@ static void drawTranscript() {
       spr.fillRect(8, drawTop, 2, drawBot - drawTop, p.body);
     }
 
-    // Word-wrapped text
     int len = strlen(tama.lines[i]);
     spr.setTextColor(col, p.bg);
     for (int off = 0; off < len; off += WRAP_COLS) {
@@ -1146,6 +1147,9 @@ void setup() {
   audioInit();      // ES8311 + I2S + speaker amp; beep() is a no-op until this runs
   bool pmuOk = powerInit();   // AXP2101 battery/power; getters degrade safely if absent
   Serial.printf("power init: %s\n", pmuOk ? "ok" : "failed");
+
+  hwRtcInit();
+  if (hwRtcLoad()) _rtcValid = true;
 
   startBt();
   lastInteractMs = millis();
@@ -1449,9 +1453,12 @@ void loop() {
     blit();
   }
 
-  // Auto screen-off on battery only — while charging we leave the clock up.
-  if (!screenOff && !inPrompt && !_onUsb
-      && millis() - lastInteractMs > SCREEN_OFF_MS) {
+  // Auto screen-off after the user-configured delay.
+  uint32_t sofDelay = screenOffDelay();
+  if (!screenOff && !inPrompt && sofDelay > 0
+      && millis() - lastInteractMs > sofDelay) {
+    spr.fillScreen(BLACK);
+    blit();
     Set_Backlight(0);
     screenOff = true;
   }

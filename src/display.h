@@ -22,4 +22,5 @@ extern Arduino_Canvas *canvas;
 
 // ── Public API ─────────────────────────────────────────────────────────
 void displayInit();          // full hardware init: I2C, expander, RGB panel, canvas
-void Set_Backlight(uint8_t pct);   // stub — always full brightness on 4B
+void backlightInit();              // LEDC PWM setup on GPIO 4; call after displayInit()
+void Set_Backlight(uint8_t pct);   // 0 = off, 1..100 = brightness via PWM

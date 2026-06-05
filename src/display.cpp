@@ -56,6 +56,10 @@ void displayInit() {
   expander->digitalWrite(5, HIGH); // Release LCD reset
   delay(200);
 
+  // Init LEDC backlight PWM BEFORE the RGB panel so the PLL clock state
+  // is stable when esp_lcd_new_rgb_panel configures its pixel clock.
+  backlightInit();
+
   // Init the canvas — this internally calls gfx->begin() which sends the
   // ST7701 init commands via software SPI and allocates the RGB panel.
   // Do NOT call gfx->begin() separately — ESP32-S3 only has 1 RGB panel
@@ -63,15 +67,29 @@ void displayInit() {
   if (!canvas->begin()) {
     Serial.println("[display] canvas->begin() failed!");
   }
+
   canvas->fillScreen(BLACK);
   canvas->flush();
 
   Serial.println("[display] init ok");
 }
 
-// ── Stubs ──────────────────────────────────────────────────────────────
-// Backlight is always-on via AXP2101 rail. Real brightness control
-// requires PMIC integration (future enhancement).
+// ── Backlight PWM via LEDC on GPIO 4 (from Waveshare BSP) ────────────
+#define BL_PIN   4
+#define BL_FREQ  5000
+#define BL_BITS  10
+
+static bool _blReady = false;
+
+void backlightInit() {
+  ledcAttach(BL_PIN, BL_FREQ, BL_BITS);
+  _blReady = true;
+  Set_Backlight(100);
+}
+
 void Set_Backlight(uint8_t pct) {
-  (void)pct;
+  if (!_blReady) return;
+  if (pct > 100) pct = 100;
+  uint32_t duty = (1023 * (100 - pct)) / 100;
+  ledcWrite(BL_PIN, duty);
 }

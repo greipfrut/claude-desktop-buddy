@@ -82,6 +82,7 @@ static void _applyJson(const char* line, TamaState* out) {
   if (!t.isNull() && t.size() == 2) {
     time_t local = (time_t)t[0].as<uint32_t>() + (int32_t)t[1];
     clockSetFromLocal(local);
+    hwRtcSave(local);
     extern uint32_t _clkLastRead;
     _clkLastRead = 0;
     _rtcValid = true;
