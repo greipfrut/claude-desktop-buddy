@@ -16,6 +16,7 @@ using fs::File;
 #include "character.h"
 #include "stats.h"
 #include "audio.h"
+#include "power.h"
 
 // Back the audio module's settings accessors (declared in audio.h) with the
 // real Settings instance. audio.cpp can't include stats.h (file-static state),
@@ -34,23 +35,6 @@ bool    audioSineWave() { return settings().sineWave; }
 const int W = LCD_WIDTH;
 const int H = LCD_HEIGHT;
 const int CX = W / 2;
-
-// ───────────────────────────────────────────────────────────────────────────
-// Battery + power stubs (Waveshare S3 Touch LCD 4B)
-// ───────────────────────────────────────────────────────────────────────────
-// The 4B has an AXP2101 PMIC for battery management. For MVP, we stub
-// everything: always report full battery on USB. Real PMIC integration
-// is a future enhancement.
-int  batteryMilliVolts()    { return 4200; }
-int  batteryPercent()       { return 100; }
-int  batteryMilliAmps()     { return 0; }
-bool batteryUsbPresent()    { return true; }
-int  batteryUsbMilliVolts() { return 5000; }
-
-static void powerOff() {
-  // AXP2101 power-off requires PMIC I2C commands. For MVP, just restart.
-  ESP.restart();
-}
 
 // ───────────────────────────────────────────────────────────────────────────
 // BLE advertise name: "Claude-XXXX" from last two BT MAC bytes
