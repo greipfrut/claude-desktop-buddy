@@ -1,172 +1,153 @@
 # claude-desktop-buddy
 
-Claude for macOS and Windows can connect Claude Cowork and Claude Code to
-maker devices over BLE, so developers and makers can build hardware that
-displays permission prompts, recent messages, and other interactions. We've
-been impressed by the creativity of the maker community around Claude -
-providing a lightweight, opt-in API is our way of making it easier to build
-fun little hardware devices that integrate with Claude.
+A BLE desk pet for Claude Desktop, running on the [Waveshare ESP32-S3-Touch-LCD-4B](https://www.waveshare.com/esp32-s3-touch-lcd-4b.htm). It connects to the Claude macOS/Windows app over Bluetooth, showing permission prompts, session activity, and an animated pet character on a 480x480 touchscreen.
 
-> **Building your own device?** You don't need any of the code here. See
-> **[REFERENCE.md](REFERENCE.md)** for the wire protocol: Nordic UART
-> Service UUIDs, JSON schemas, and the folder push transport.
+The pet sleeps when nothing is happening, wakes when sessions start, sweats when Claude is working hard, and alerts you when a permission prompt is waiting. Approve or deny right from the touchscreen.
 
-As an example, we built a desk pet on ESP32 that lives off permission
-approvals and interaction with Claude. It sleeps when nothing's happening,
-wakes when sessions start, gets visibly impatient when an approval prompt is
-waiting, and lets you approve or deny right from the device.
+Forked from [FradSer/claude-desktop-buddy](https://github.com/FradSer/claude-desktop-buddy), which targets the M5StickC Plus. This fork rewrites the hardware layer for the Waveshare 4B's larger touchscreen, audio codec, and battery management.
 
 <p align="center">
-  <img src="docs/device.jpg" alt="M5StickC Plus running the buddy firmware" width="500">
+  <img src="docs/mockup-home.svg" alt="Home screen: clock, pet name, battery, ASCII buddy, session status" width="360">
+  <img src="docs/mockup-approval.svg" alt="Approval screen: tool name, scrollable hint, OK/NO buttons" width="360">
 </p>
 
 ## Hardware
 
-The firmware targets ESP32 with the Arduino framework. As written, it
-depends on the M5StickCPlus library for its display, IMU, and button
-drivers—so you'll need that board, or a fork that swaps those drivers for
-your own pin layout.
+**Board:** Waveshare ESP32-S3-Touch-LCD-4B
+
+- 480x480 ST7701 RGB parallel display
+- GT911 capacitive touchscreen (I2C)
+- AXP2101 power management (battery monitoring, charging, power-off)
+- ES8311 audio DAC with speaker amplifier
+- ESP32-S3 with 16MB flash, 8MB PSRAM
+- PH2.0 LiPo battery connector
+
+No other boards are supported by this build. The original M5StickC Plus firmware lives in the upstream repo.
 
 ## Flashing
 
-Install
-[PlatformIO Core](https://docs.platformio.org/en/latest/core/installation/),
-then:
+### Prebuilt binary (no build tools needed)
+
+Download `firmware-merged.bin` from the [latest release](https://github.com/greipfrut/claude-desktop-buddy/releases/latest), install [esptool](https://github.com/espressif/esptool) (`pip install esptool`), and flash:
 
 ```bash
-pio run -t upload
+esptool.py --chip esp32s3 --port COM4 write_flash 0x0 firmware-merged.bin
 ```
 
-If you're starting from a previously-flashed device, wipe it first:
+Replace `COM4` with your port (`/dev/ttyUSB0` on Linux, `/dev/cu.usbserial-*` on macOS).
+
+If the device had different firmware before, erase first:
 
 ```bash
-pio run -t erase && pio run -t upload
+esptool.py --chip esp32s3 --port COM4 erase_flash
+esptool.py --chip esp32s3 --port COM4 write_flash 0x0 firmware-merged.bin
 ```
 
-Once running, you can also wipe everything from the device itself: **hold A
-→ settings → reset → factory reset → tap twice**.
+### Build from source (PlatformIO)
+
+```bash
+git clone https://github.com/greipfrut/claude-desktop-buddy.git
+cd claude-desktop-buddy
+pio run                                    # build
+pio run -t upload --upload-port COM4       # flash firmware
+pio run -t uploadfs --upload-port COM4     # flash GIF filesystem (optional)
+```
+
+The first build takes 10+ minutes (from-source framework compile with custom sdkconfig for PSRAM and GDMA fixes). Later builds take 1-3 minutes.
 
 ## Pairing
 
-To pair your device with Claude, first enable developer mode (**Help →
-Troubleshooting → Enable Developer Mode**). Then, open the Hardware Buddy
-window in **Developer → Open Hardware Buddy…**, click **Connect**, and pick
-your device from the list. macOS will prompt for Bluetooth permission on
-first connect; grant it.
+1. Enable developer mode in Claude Desktop: **Help > Troubleshooting > Enable Developer Mode**
+2. Open **Developer > Open Hardware Buddy**
+3. Click **Connect** and pick your device (advertises as `Claude-XXXX`)
+4. macOS will prompt for Bluetooth permission on first connect
 
-<p align="center">
-  <img src="docs/menu.png" alt="Developer → Open Hardware Buddy… menu item" width="420">
-  <img src="docs/hardware-buddy-window.png" alt="Hardware Buddy window with Connect button and folder drop target" width="420">
-</p>
-
-Once paired, the bridge auto-reconnects whenever both sides are awake.
-
-If discovery isn't finding the stick:
-
-- Make sure it's awake (any button press)
-- Check the stick's settings menu → bluetooth is on
+The bridge auto-reconnects whenever both sides are awake.
 
 ## Controls
 
-|                         | Normal               | Pet         | Info        | Approval    |
-| ----------------------- | -------------------- | ----------- | ----------- | ----------- |
-| **A** (front)           | next screen          | next screen | next screen | **approve** |
-| **B** (right)           | scroll transcript    | next page   | next page   | **deny**    |
-| **Hold A**              | menu                 | menu        | menu        | menu        |
-| **Power** (left, short) | toggle screen off    |             |             |             |
-| **Power** (left, ~6s)   | hard power off       |             |             |             |
-| **Shake**               | dizzy                |             |             | —           |
-| **Face-down**           | nap (energy refills) |             |             |             |
+Everything is touch-based. There are no physical buttons.
 
-The screen auto-powers-off after 30s of no interaction (kept on while an
-approval prompt is up). Any button press wakes it.
+| Gesture | Action |
+|---|---|
+| Tap | Next screen (home > pet > info > home) |
+| Tap (on menu row) | Select / confirm |
+| Long press | Open or close menu |
+| Drag vertically | Scroll the approval hint text |
+| Tap OK / NO | Approve or deny a permission prompt |
 
-## ASCII pets
+The screen turns off after 30 seconds of inactivity (stays on while a prompt is waiting or while charging). Any touch wakes it.
 
-Eighteen pets, each with seven animations (sleep, idle, busy, attention,
-celebrate, dizzy, heart). Menu → "next pet" cycles them with a counter.
-Choice persists to NVS.
+## Screens
 
-## GIF pets
+**Home** - Top bar shows the clock, pet name, and battery percentage. The pet fills the center. Bottom bar shows running/waiting sessions, level, and the latest status message.
 
-If you want a custom GIF character instead of an ASCII buddy, drag a
-character pack folder onto the drop target in the Hardware Buddy window. The
-app streams it over BLE and the stick switches to GIF mode live. **Settings
-→ delete char** reverts to ASCII mode.
+**Approval** - When Claude needs permission to run a tool, the screen shows the tool name, the full hint text (scrollable by dragging), and large OK/NO buttons. A timer counts how long the prompt has been waiting.
 
-A character pack is a folder with `manifest.json` and 96px-wide GIFs:
+**Pet** - Stats page (mood, fed, energy, level, approval counts, token usage) and a how-to page. Tap to cycle pages.
 
-```json
-{
-  "name": "bufo",
-  "colors": {
-    "body": "#6B8E23",
-    "bg": "#000000",
-    "text": "#FFFFFF",
-    "textDim": "#808080",
-    "ink": "#000000"
-  },
-  "states": {
-    "sleep": "sleep.gif",
-    "idle": ["idle_0.gif", "idle_1.gif", "idle_2.gif"],
-    "busy": "busy.gif",
-    "attention": "attention.gif",
-    "celebrate": "celebrate.gif",
-    "dizzy": "dizzy.gif",
-    "heart": "heart.gif"
-  }
-}
+**Info** - Six pages: about, touch help, Claude session details, device/battery, Bluetooth status, credits. Tap to cycle.
+
+**Clock** - Appears automatically when idle, connected, and on USB power. Shows the current time synced from the desktop bridge.
+
+**Menu** - Long-press anywhere to open. Settings (brightness, sound, Bluetooth, pet selection, etc.), power off, help, about, demo mode.
+
+## Pets
+
+Eighteen ASCII species, each with seven animations (sleep, idle, busy, attention, celebrate, dizzy, heart). Cycle them in Settings > pet. Your choice persists across reboots.
+
+You can also install a custom GIF character by dragging a character pack folder onto the Hardware Buddy window in Claude Desktop, or by flashing directly:
+
+```bash
+python tools/flash_character.py characters/bufo
 ```
 
-State values can be a single filename or an array. Arrays rotate: each
-loop-end advances to the next GIF, useful for an idle activity carousel so
-the home screen doesn't loop one clip forever.
-
-GIFs are 96px wide; height up to ~140px stays on a 135×240 portrait screen.
-Crop tight to the character — transparent margins waste screen and shrink
-the sprite. `tools/prep_character.py` handles the resize: feed it source
-GIFs at any sizes and it produces a 96px-wide set where the character is the
-same scale in every state.
-
-The whole folder must fit under 1.8MB —
-`gifsicle --lossy=80 -O3 --colors 64` typically cuts 40–60%.
-
-See `characters/bufo/` for a working example.
-
-If you're iterating on a character and would rather skip the BLE round-trip,
-`tools/flash_character.py characters/bufo` stages it into `data/` and runs
-`pio run -t uploadfs` directly over USB.
+A character pack is a folder containing `manifest.json` and GIF files. See `characters/bufo/` for an example. GIFs are upscaled with nearest-neighbor filtering to fill the 480x480 display.
 
 ## The seven states
 
-| State       | Trigger                     | Feel                        |
-| ----------- | --------------------------- | --------------------------- |
-| `sleep`     | bridge not connected        | eyes closed, slow breathing |
-| `idle`      | connected, nothing urgent   | blinking, looking around    |
-| `busy`      | sessions actively running   | sweating, working           |
-| `attention` | approval pending            | alert, **LED blinks**       |
-| `celebrate` | level up (every 50K tokens) | confetti, bouncing          |
-| `dizzy`     | you shook the stick         | spiral eyes, wobbling       |
-| `heart`     | approved in under 5s        | floating hearts             |
+| State | Trigger | Look |
+|---|---|---|
+| sleep | Bridge not connected | Eyes closed, slow breathing |
+| idle | Connected, nothing urgent | Blinking, looking around |
+| busy | Sessions actively running | Sweating, working |
+| attention | Approval prompt pending | Alert, urgent |
+| celebrate | Level up (every 50K tokens) | Confetti, bouncing |
+| dizzy | (reserved for future IMU shake) | Spiral eyes, wobbling |
+| heart | Approved a prompt in under 5 seconds | Floating hearts |
 
 ## Project layout
 
 ```
 src/
-  main.cpp       — loop, state machine, UI screens
-  buddy.cpp      — ASCII species dispatch + render helpers
-  buddies/       — one file per species, seven anim functions each
-  ble_bridge.cpp — Nordic UART service, line-buffered TX/RX
-  character.cpp  — GIF decode + render
-  data.h         — wire protocol, JSON parse
-  xfer.h         — folder push receiver
-  stats.h        — NVS-backed stats, settings, owner, species choice
-characters/      — example GIF character packs
-tools/           — generators and converters
+  main.cpp          - Loop, state machine, all UI screens, gesture decoder
+  display.h/cpp     - ST7701 RGB panel driver, canvas setup
+  touch.h/cpp       - GT911 capacitive touch driver
+  power.h/cpp       - AXP2101 battery/charging reads, power-off
+  audio.h/cpp       - ES8311 DAC, async beep synthesis
+  es8311.h/c        - ES8311 codec register driver
+  compat.h          - Display library shims (TFT_eSPI to Arduino_GFX)
+  buddy.h/cpp       - ASCII species dispatch and render helpers
+  buddies/          - One file per species (18 total), seven animations each
+  character.h/cpp   - GIF decode and render with integer upscaling
+  ble_bridge.h/cpp  - Nordic UART Service BLE stack
+  data.h            - Wire protocol JSON parser
+  stats.h           - NVS-backed persistent stats and settings
+  xfer.h            - BLE folder push receiver (GIF character transfer)
+  clock.h           - Software RTC (synced from desktop bridge)
+characters/         - Example GIF character packs
+tools/              - prep_character.py, flash_character.py
+platformio.ini      - PlatformIO build config (pioarduino, from-source sdkconfig)
+partitions.csv      - Flash partition table
+REFERENCE.md        - BLE wire protocol spec (Nordic UART, JSON schemas)
+CLAUDE.md           - Project guide and build notes
 ```
 
-## Availability
+## BLE protocol
 
-The BLE API is only available when the desktop apps are in developer mode
-(**Help → Troubleshooting → Enable Developer Mode**). It's intended for
-makers and developers and isn't an officially supported product feature.
+The device communicates over the Nordic UART Service. The wire protocol is documented in [REFERENCE.md](REFERENCE.md): UUIDs, JSON schemas, and the folder push transport. Any device that advertises Nordic UART and parses newline-delimited JSON will work with Claude Desktop's Hardware Buddy bridge.
+
+## Credits
+
+Original project by Felix Rieseberg / Anthropic.
+Waveshare 4B port by [greipfrut](https://github.com/greipfrut) and Claude.
