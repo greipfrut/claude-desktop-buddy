@@ -17,6 +17,12 @@ using fs::File;
 #include "stats.h"
 #include "audio.h"
 
+// Back the audio module's settings accessors (declared in audio.h) with the
+// real Settings instance. audio.cpp can't include stats.h (file-static state),
+// so it reads volume/waveform through these from the single owning TU.
+uint8_t audioVolume()   { return settings().volume; }
+bool    audioSineWave() { return settings().sineWave; }
+
 // ───────────────────────────────────────────────────────────────────────────
 // Canvas + panel geometry
 // ───────────────────────────────────────────────────────────────────────────
@@ -1031,21 +1037,26 @@ void loop() {
   if (baseState == P_IDLE && (int32_t)(now - wakeTransitionUntil) < 0) baseState = P_SLEEP;
   if ((int32_t)(now - oneShotUntil) >= 0) activeState = baseState;
 
-  // Prompt arrival: beep, jump to normal, clear overlays.
-  if (strcmp(tama.promptId, lastPromptId) != 0) {
+  // Prompt arrival: beep, jump to normal, clear overlays — but ONLY for a
+  // genuinely new prompt. The bridge re-sends a pending prompt interleaved with
+  // heartbeats that omit it, so tama.promptId flickers id→""→id. Prompt ids are
+  // unique per request, so we act only when a new NON-EMPTY id differs from the
+  // last one we acted on, and we never reset lastPromptId on an empty message.
+  // (The old code reset it to "" on every flicker, so the same pending prompt
+  // re-fired the beep + menu-close every heartbeat — a constant-beep storm that
+  // also slammed any open menu shut, making the volume control unusable.)
+  if (tama.promptId[0] && strcmp(tama.promptId, lastPromptId) != 0) {
     strncpy(lastPromptId, tama.promptId, sizeof(lastPromptId)-1);
     lastPromptId[sizeof(lastPromptId)-1] = 0;
     responseSent = false;
-    if (tama.promptId[0]) {
-      promptArrivedMs = millis();
-      wake();
-      beep(1200, 80);   // prompt arrival
-      displayMode = DISP_NORMAL;
-      menuOpen = settingsOpen = resetOpen = false;
-      applyDisplayMode();
-      characterInvalidate();
-      if (buddyMode) buddyInvalidate();
-    }
+    promptArrivedMs = millis();
+    wake();
+    beep(1200, 80);   // prompt arrival
+    displayMode = DISP_NORMAL;
+    menuOpen = settingsOpen = resetOpen = audioOpen = false;
+    applyDisplayMode();
+    characterInvalidate();
+    if (buddyMode) buddyInvalidate();
   }
 
   bool inPrompt = tama.promptId[0] && !responseSent;
@@ -1100,7 +1111,10 @@ void loop() {
         }
       }
     } else if (audioOpen) {
-      beep(1800, 30);
+      // No nav-click here: applyAudio() plays a sample beep at the NEW volume,
+      // so each level is heard accurately. A nav-click would fire at the OLD
+      // volume first — making "off" (tapped from level 4) play a loud click and
+      // reading as louder than level 1. Let the sample tone be the only feedback.
       int r = hitAudio(ty);
       if (r >= 0) { audioSel = r; applyAudio(r); }
     } else if (resetOpen) {

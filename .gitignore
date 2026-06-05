@@ -2,3 +2,13 @@
 .vscode/
 .DS_Store
 data/
+
+# pioarduino from-source build artifacts (generated when custom_sdkconfig /
+# custom_component_remove trigger an in-tree IDF build)
+/CMakeLists.txt
+/sdkconfig.defaults
+/sdkconfig.waveshare-s3-touch-lcd-4b
+/managed_components/
+/dependencies.lock
+/.dummy/
+*.log

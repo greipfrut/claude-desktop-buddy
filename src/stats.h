@@ -186,12 +186,12 @@ struct Settings {
   uint8_t bright;   // 0..4 → 20..100% backlight
 };
 
-static Settings _settings = { 3, false, true, true, true, true, 2 };
+static Settings _settings = { 2, false, true, true, true, true, 2 };
 
 inline void settingsLoad() {
   _prefs.begin("buddy", true);
-  _settings.volume   = _prefs.getUChar("s_vol", 3);
-  if (_settings.volume > 4) _settings.volume = 3;
+  _settings.volume   = _prefs.getUChar("s_vol", 2);
+  if (_settings.volume > 4) _settings.volume = 2;
   _settings.sineWave = _prefs.getBool("s_wav", false);
   _settings.gestures = _prefs.getBool("s_gst", true);
   _settings.bt       = _prefs.getBool("s_bt",  true);
