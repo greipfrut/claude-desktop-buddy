@@ -166,6 +166,9 @@ const uint8_t MENU_N = 3;
 
 bool    settingsOpen = false;
 uint8_t settingsSel  = 0;
+static uint8_t settingsScrollOff = 0;
+static int16_t settingsDragAccum = 0;
+static const uint8_t SETTINGS_VISIBLE = 5;
 const char* settingsItems[] = { "bright", "sleep", "sound", "bt", "pair", "hud", "pet", "reset", "back" };
 const uint8_t SETTINGS_N = 9;
 
@@ -194,7 +197,12 @@ static void applySetting(uint8_t idx) {
     case 5: s.hud = !s.hud; break;
     case 6: nextPet(); return;
     case 7: resetOpen = true; resetSel = 0; resetConfirmIdx = 0xFF; return;
-    case 8: settingsOpen = false; redrawAll(); return;
+    case 8:
+      settingsOpen = false;
+      characterSetPeek(displayMode != DISP_NORMAL);
+      buddySetPeek(displayMode != DISP_NORMAL);
+      redrawAll();
+      return;
   }
   settingsSave();
 }
@@ -272,20 +280,29 @@ static void drawMenuHints(const Palette& p, int mx, int mw, int hy) {
 
 static void drawSettings() {
   const Palette& p = characterPalette();
-  int mw = 360, mh = 16 + SETTINGS_N * 36 + MENU_HINT_H;
-  int mx = (W - mw) / 2, my = (H - mh) / 2;
+
+  if (settingsSel < settingsScrollOff) settingsScrollOff = settingsSel;
+  if (settingsSel >= settingsScrollOff + SETTINGS_VISIBLE)
+    settingsScrollOff = settingsSel - SETTINGS_VISIBLE + 1;
+
+  int mw = 360;
+  int mh = 16 + SETTINGS_VISIBLE * 36 + MENU_HINT_H;
+  int mx = (W - mw) / 2;
+  int my = H - mh;
   spr.fillRoundRect(mx, my, mw, mh, 8, PANEL);
   spr.drawRoundRect(mx, my, mw, mh, 8, p.textDim);
   spr.setTextSize(3);
   Settings& s = settings();
-  for (int i = 0; i < SETTINGS_N; i++) {
+  for (int v = 0; v < SETTINGS_VISIBLE; v++) {
+    int i = v + settingsScrollOff;
+    if (i >= SETTINGS_N) break;
     bool sel = (i == settingsSel);
     spr.setTextColor(sel ? p.text : p.textDim, PANEL);
-    spr.setCursor(mx + 10, my + 14 + i * 36);
+    spr.setCursor(mx + 10, my + 14 + v * 36);
     spr.print(sel ? "> " : "  ");
     spr.print(settingsItems[i]);
     spr.setTextSize(2);
-    spr.setCursor(mx + mw - 70, my + 18 + i * 36);
+    spr.setCursor(mx + mw - 80, my + 18 + v * 36);
     spr.setTextColor(p.textDim, PANEL);
     switch (i) {
       case 0: spr.printf("%u/5", s.bright + 1); break;
@@ -317,6 +334,17 @@ static void drawSettings() {
     }
     spr.setTextSize(3);
   }
+
+  if (SETTINGS_N > SETTINGS_VISIBLE) {
+    int trackX = mx + mw - 10, trackY = my + 10;
+    int trackH = SETTINGS_VISIBLE * 36;
+    int barH = trackH * SETTINGS_VISIBLE / SETTINGS_N;
+    if (barH < 10) barH = 10;
+    int maxOff = SETTINGS_N - SETTINGS_VISIBLE;
+    int barY = trackY + (trackH - barH) * settingsScrollOff / maxOff;
+    spr.fillRect(trackX, barY, 4, barH, p.textDim);
+  }
+
   drawMenuHints(p, mx, mw, my + mh - 14);
   spr.setTextSize(1);
 }
@@ -373,7 +401,12 @@ static void drawReset() {
 
 void menuConfirm() {
   switch (menuSel) {
-    case 0: settingsOpen = true; menuOpen = false; settingsSel = 0; break;
+    case 0:
+      settingsOpen = true; menuOpen = false; settingsSel = 0;
+      settingsScrollOff = 0; settingsDragAccum = 0;
+      buddySetPeek(false); characterSetPeek(false);
+      buddyInvalidate(); characterInvalidate();
+      break;
     case 1:
       menuOpen = false;
       displayMode = DISP_INFO;
@@ -1107,11 +1140,13 @@ static int hitMenu(int ty) {
   return (i >= 0 && i < MENU_N) ? i : -1;
 }
 static int hitSettings(int ty) {
-  int mh = 16 + SETTINGS_N * 36 + MENU_HINT_H;
-  int my = (H - mh) / 2;
+  int mh = 16 + SETTINGS_VISIBLE * 36 + MENU_HINT_H;
+  int my = H - mh;
   int firstY = my + 14;
-  int i = (ty - firstY) / 36;
-  return (i >= 0 && i < SETTINGS_N) ? i : -1;
+  int visRow = (ty - firstY) / 36;
+  if (visRow < 0 || visRow >= SETTINGS_VISIBLE) return -1;
+  int i = visRow + settingsScrollOff;
+  return (i < SETTINGS_N) ? i : -1;
 }
 static int hitReset(int ty) {
   int mh = 20 + RESET_N * 44 + MENU_HINT_H;
@@ -1281,15 +1316,36 @@ void loop() {
   }
 
   if (g == G_DRAG) {
-    if (inPrompt) hintScroll -= gDragDy;
-    else if (displayMode == DISP_TRANSCRIPT) transcriptScroll -= gDragDy;
+    if (settingsOpen && !audioOpen && !resetOpen) {
+      settingsDragAccum -= gDragDy;
+      int maxOff = SETTINGS_N - SETTINGS_VISIBLE;
+      while (settingsDragAccum >= 36 && settingsScrollOff < maxOff) {
+        settingsScrollOff++;
+        settingsDragAccum -= 36;
+      }
+      while (settingsDragAccum <= -36 && settingsScrollOff > 0) {
+        settingsScrollOff--;
+        settingsDragAccum += 36;
+      }
+      if (settingsScrollOff == 0 && settingsDragAccum < 0) settingsDragAccum = 0;
+      if (settingsScrollOff >= maxOff && settingsDragAccum > 0) settingsDragAccum = 0;
+    } else if (inPrompt) {
+      hintScroll -= gDragDy;
+    } else if (displayMode == DISP_TRANSCRIPT) {
+      transcriptScroll -= gDragDy;
+    }
   }
 
   if (g == G_LONG) {
     beep(800, 60);
     if (resetOpen) { resetOpen = false; redrawAll(); }
     else if (audioOpen) { audioOpen = false; redrawAll(); }
-    else if (settingsOpen) { settingsOpen = false; redrawAll(); }
+    else if (settingsOpen) {
+      settingsOpen = false;
+      characterSetPeek(displayMode != DISP_NORMAL);
+      buddySetPeek(displayMode != DISP_NORMAL);
+      redrawAll();
+    }
     else {
       menuOpen = !menuOpen;
       menuSel = 0;
