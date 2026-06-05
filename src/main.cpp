@@ -1088,6 +1088,14 @@ void loop() {
 
   bool inPrompt = tama.promptId[0] && !responseSent;
 
+  // If a prompt was showing but just cleared (answered from desktop or timed
+  // out), repaint the whole screen so the approval UI doesn't leave residue.
+  static bool wasInPrompt = false;
+  if (wasInPrompt && !inPrompt) {
+    redrawAll();
+  }
+  wasInPrompt = inPrompt;
+
   // ── Touch dispatch ────────────────────────────────────────────────────
   GestureKind g = pollGesture();
 
