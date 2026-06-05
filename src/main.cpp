@@ -281,10 +281,6 @@ static void drawMenuHints(const Palette& p, int mx, int mw, int hy) {
 static void drawSettings() {
   const Palette& p = characterPalette();
 
-  if (settingsSel < settingsScrollOff) settingsScrollOff = settingsSel;
-  if (settingsSel >= settingsScrollOff + SETTINGS_VISIBLE)
-    settingsScrollOff = settingsSel - SETTINGS_VISIBLE + 1;
-
   int mw = 360;
   int mh = 16 + SETTINGS_VISIBLE * 36 + MENU_HINT_H;
   int mx = (W - mw) / 2;
@@ -1488,7 +1484,9 @@ void loop() {
   if (!screenOff) {
     if (blePasskey()) drawPasskey();
     else if (clocking) drawClock();
-    else if (displayMode == DISP_INFO) drawInfo();
+    else if (settingsOpen || audioOpen || resetOpen) {
+      // pet animates behind the bottom-sheet; skip page overlays
+    } else if (displayMode == DISP_INFO) drawInfo();
     else if (displayMode == DISP_PET) drawPet();
     else if (displayMode == DISP_TRANSCRIPT) drawTranscript();
     else if (settings().hud) drawHUD();
