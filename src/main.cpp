@@ -353,7 +353,7 @@ static void drawAudio() {
   const Palette& p = characterPalette();
   Settings& s = settings();
   int mw = 360, mh = 16 + AUDIO_N * 36 + MENU_HINT_H;
-  int mx = (W - mw) / 2, my = (H - mh) / 2;
+  int mx = (W - mw) / 2, my = H - mh;
   spr.fillRoundRect(mx, my, mw, mh, 8, PANEL);
   spr.drawRoundRect(mx, my, mw, mh, 8, p.textDim);
   spr.setTextSize(3);
@@ -381,7 +381,7 @@ static void drawAudio() {
 static void drawReset() {
   const Palette& p = characterPalette();
   int mw = 360, mh = 20 + RESET_N * 44 + MENU_HINT_H;
-  int mx = (W - mw) / 2, my = (H - mh) / 2;
+  int mx = (W - mw) / 2, my = H - mh;
   spr.fillRoundRect(mx, my, mw, mh, 8, PANEL);
   spr.drawRoundRect(mx, my, mw, mh, 8, HOT);
   spr.setTextSize(3);
@@ -1150,7 +1150,7 @@ static int hitSettings(int ty) {
 }
 static int hitReset(int ty) {
   int mh = 20 + RESET_N * 44 + MENU_HINT_H;
-  int my = (H - mh) / 2;
+  int my = H - mh;
   int firstY = my + 18;
   int i = (ty - firstY) / 44;
   return (i >= 0 && i < RESET_N) ? i : -1;
@@ -1158,7 +1158,7 @@ static int hitReset(int ty) {
 
 static int hitAudio(int ty) {
   int mh = 16 + AUDIO_N * 36 + MENU_HINT_H;
-  int my = (H - mh) / 2;
+  int my = H - mh;
   int firstY = my + 14;
   int i = (ty - firstY) / 36;
   return (i >= 0 && i < AUDIO_N) ? i : -1;
