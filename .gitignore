@@ -12,3 +12,6 @@ data/
 /dependencies.lock
 /.dummy/
 *.log
+
+# superpowers brainstorming visual-companion scratch
+.superpowers/
