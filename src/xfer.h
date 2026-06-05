@@ -138,19 +138,17 @@ inline bool xferCommand(JsonDocument& doc) {
     // Dump everything the info screens show. Manual printf rather than
     // ArduinoJson serialize — less heap churn, and the shape is fixed.
     int vBat = batteryMilliVolts();
-    int iBat = batteryMilliAmps();
-    int vBus = batteryUsbMilliVolts();
     int pct  = batteryPercent();
     char b[320];
     int len = snprintf(b, sizeof(b),
       "{\"ack\":\"status\",\"ok\":true,\"n\":0,\"data\":{"
       "\"name\":\"%s\",\"owner\":\"%s\",\"sec\":%s,"
-      "\"bat\":{\"pct\":%d,\"mV\":%d,\"mA\":%d,\"usb\":%s},"
+      "\"bat\":{\"pct\":%d,\"mV\":%d,\"usb\":%s},"
       "\"sys\":{\"up\":%lu,\"heap\":%u,\"fsFree\":%lu,\"fsTotal\":%lu},"
       "\"stats\":{\"appr\":%u,\"deny\":%u,\"vel\":%u,\"nap\":%lu,\"lvl\":%u}"
       "}}\n",
       petName(), ownerName(), bleSecure() ? "true" : "false",
-      pct, vBat, iBat, batteryUsbPresent() ? "true" : "false",
+      pct, vBat, batteryUsbPresent() ? "true" : "false",
       millis() / 1000, ESP.getFreeHeap(),
       (unsigned long)(_xFsTotal - _xFsUsed),   // cached: no FS traversal on hot path
       (unsigned long)_xFsTotal,

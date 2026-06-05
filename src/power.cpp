@@ -70,7 +70,8 @@ void powerPoll() {
     cPct = pmu.isBatteryConnect() ? lipoPercent(cMv) : (cUsb ? 100 : lipoPercent(cMv));
   }
   cFull = (pmu.getChargerStatus() == XPOWERS_AXP2101_CHG_DONE_STATE);
-  cMa   = 0;   // AXP2101 battery current isn't exposed reliably via XPowersLib
+  // AXP2101 has no current-sense ADC (datasheet section 6.10: only VBAT, VBUS,
+  // VSYS, TS, and die temp). cMa stays 0; callers should not display it.
 }
 
 int  batteryMilliVolts()    { return cMv; }
