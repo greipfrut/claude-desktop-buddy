@@ -13,6 +13,21 @@ static char     _xCharName[24] = "";
 static bool     _xActive = false;
 static uint32_t _xTotal = 0, _xTotalWritten = 0;
 
+// Cached LittleFS sizes. BOTH LittleFS.totalBytes() and usedBytes() call
+// esp_littlefs_info() → lfs_fs_size(), which walks the entire filesystem — a
+// long burst of flash reads that disables the SPI cache. On the 4B that starves
+// the RGB-panel DMA and the panel's (flash-resident) restart ISR then faults:
+// "Cache disabled but cached memory region accessed". The status poll runs
+// often, so we serve fsTotal/fsFree from these caches and only recompute at
+// controlled moments: boot (before the panel starts) and after a transfer.
+static uint32_t _xFsUsed = 0, _xFsTotal = 0;
+inline void xferRefreshFsUsed() {
+  _xFsTotal = LittleFS.totalBytes();
+  _xFsUsed  = LittleFS.usedBytes();
+}
+inline uint32_t xferFsUsed()  { return _xFsUsed; }
+inline uint32_t xferFsTotal() { return _xFsTotal; }
+
 // Ack goes to both streams — we don't track which one delivered the command,
 // and writes to a clientless SerialBT just drop. The bridge listens on
 // whichever port it opened.
@@ -137,8 +152,8 @@ inline bool xferCommand(JsonDocument& doc) {
       petName(), ownerName(), bleSecure() ? "true" : "false",
       pct, vBat, iBat, batteryUsbPresent() ? "true" : "false",
       millis() / 1000, ESP.getFreeHeap(),
-      (unsigned long)(LittleFS.totalBytes() - LittleFS.usedBytes()),
-      (unsigned long)LittleFS.totalBytes(),
+      (unsigned long)(_xFsTotal - _xFsUsed),   // cached: no FS traversal on hot path
+      (unsigned long)_xFsTotal,
       stats().approvals, stats().denials, statsMedianVelocity(),
       (unsigned long)stats().napSeconds, stats().level
     );
@@ -154,7 +169,7 @@ inline bool xferCommand(JsonDocument& doc) {
     // Fit check: free space after wiping everything under /characters/.
     // Do the math before touching the filesystem so a failed check leaves
     // the current character intact.
-    uint32_t free = LittleFS.totalBytes() - LittleFS.usedBytes();
+    uint32_t free = _xFsTotal - _xFsUsed;   // cached; FS unchanged since last refresh
     uint32_t reclaimable = 0;
     {
       File r = LittleFS.open("/characters");
@@ -238,6 +253,7 @@ inline bool xferCommand(JsonDocument& doc) {
     bool ok = characterInit(_xCharName);
     extern bool buddyMode, gifAvailable;
     if (ok) { buddyMode = false; gifAvailable = true; speciesIdxSave(0xFF); }
+    xferRefreshFsUsed();   // FS changed by the transfer — refresh the cached used-bytes
     _xAck("char_end", ok);
     return true;
   }

@@ -877,9 +877,14 @@ static int hitReset(int ty) {
 void setup() {
   Serial.begin(115200);
 
-  displayInit();    // I2C, expander, RGB panel, canvas — all in one call
-
+  // Mount LittleFS and prime the FS-size cache BEFORE the RGB panel starts.
+  // xferRefreshFsUsed() walks the filesystem (a cache-disabling flash read);
+  // doing it before displayInit() means it can't starve the not-yet-running
+  // panel and fault the RGB ISR.
   if (!LittleFS.begin(true)) Serial.println("LittleFS mount failed");
+  xferRefreshFsUsed();
+
+  displayInit();    // I2C, expander, RGB panel, canvas — all in one call
 
   startBt();
   lastInteractMs = millis();
