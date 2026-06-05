@@ -57,12 +57,18 @@ void powerPoll() {
   cChg  = pmu.isCharging();
   cMv   = pmu.getBattVoltage();    // mV
   cVbus = pmu.getVbusVoltage();    // mV
-  // Percent is estimated from voltage, NOT the AXP2101 fuel gauge. On this board
-  // (no battery profile) the gauge is unreliable: it cold-starts at 0 and slowly
-  // ramps regardless of true charge (observed ~7% at a 3.92 V / ~63% cell), so
-  // it would badly misreport. A LiPo voltage curve is less accurate under load /
-  // while charging but is honest and monotonic — good enough for a battery glyph.
-  cPct = pmu.isBatteryConnect() ? lipoPercent(cMv) : (cUsb ? 100 : lipoPercent(cMv));
+  // Percent from the AXP2101's built-in E-Gauge (reg 0xA4). The gauge learns the
+  // battery's characteristics automatically over charge/discharge cycles (datasheet
+  // section 6.11). On a fresh PMIC reset it may start at 0 and take a cycle to
+  // converge; fall back to the voltage curve during that settling period so the
+  // display doesn't show 0% on a charged cell.
+  int gaugePct = pmu.isBatteryConnect() ? pmu.getBatteryPercent() : -1;
+  if (gaugePct > 0) {
+    cPct = gaugePct;
+  } else {
+    // Gauge not ready or no battery: fall back to voltage curve
+    cPct = pmu.isBatteryConnect() ? lipoPercent(cMv) : (cUsb ? 100 : lipoPercent(cMv));
+  }
   cFull = (pmu.getChargerStatus() == XPOWERS_AXP2101_CHG_DONE_STATE);
   cMa   = 0;   // AXP2101 battery current isn't exposed reliably via XPowersLib
 }
