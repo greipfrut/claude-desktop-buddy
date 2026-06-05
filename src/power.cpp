@@ -37,6 +37,15 @@ bool powerInit() {
   pmu.enableBattVoltageMeasure();
   pmu.enableVbusVoltageMeasure();
   pmu.enableSystemVoltageMeasure();
+  pmu.enableTemperatureMeasure();
+  pmu.disableTSPinMeasure();   // 4B battery has no NTC; begin() also does this — explicit for clarity
+  // Charger configuration (matches the Waveshare 4B AXP2101 demo). Without a
+  // valid charge setup the PMIC's battery path stays disengaged and the
+  // battery-present detect reads false.
+  pmu.setPrechargeCurr(XPOWERS_AXP2101_PRECHARGE_50MA);
+  pmu.setChargerConstantCurr(XPOWERS_AXP2101_CHG_CUR_400MA);
+  pmu.setChargerTerminationCurr(XPOWERS_AXP2101_CHG_ITERM_25MA);
+  pmu.setChargeTargetVoltage(XPOWERS_AXP2101_CHG_VOL_4V2);
   Serial.println("[power] AXP2101 ready");
   powerPoll();
   return true;
@@ -48,12 +57,12 @@ void powerPoll() {
   cChg  = pmu.isCharging();
   cMv   = pmu.getBattVoltage();    // mV
   cVbus = pmu.getVbusVoltage();    // mV
-  if (pmu.isBatteryConnect()) {
-    int p = pmu.getBatteryPercent();             // -1 when the gauge has no value
-    cPct  = (p >= 0 && p <= 100) ? p : lipoPercent(cMv);
-  } else {
-    cPct  = cUsb ? 100 : lipoPercent(cMv);
-  }
+  // Percent is estimated from voltage, NOT the AXP2101 fuel gauge. On this board
+  // (no battery profile) the gauge is unreliable: it cold-starts at 0 and slowly
+  // ramps regardless of true charge (observed ~7% at a 3.92 V / ~63% cell), so
+  // it would badly misreport. A LiPo voltage curve is less accurate under load /
+  // while charging but is honest and monotonic — good enough for a battery glyph.
+  cPct = pmu.isBatteryConnect() ? lipoPercent(cMv) : (cUsb ? 100 : lipoPercent(cMv));
   cFull = (pmu.getChargerStatus() == XPOWERS_AXP2101_CHG_DONE_STATE);
   cMa   = 0;   // AXP2101 battery current isn't exposed reliably via XPowersLib
 }
