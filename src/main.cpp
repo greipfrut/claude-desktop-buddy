@@ -1031,7 +1031,7 @@ void loop() {
   if (baseState == P_IDLE && (int32_t)(now - wakeTransitionUntil) < 0) baseState = P_SLEEP;
   if ((int32_t)(now - oneShotUntil) >= 0) activeState = baseState;
 
-  // Prompt arrival: beep (no-op), jump to normal, clear overlays.
+  // Prompt arrival: beep, jump to normal, clear overlays.
   if (strcmp(tama.promptId, lastPromptId) != 0) {
     strncpy(lastPromptId, tama.promptId, sizeof(lastPromptId)-1);
     lastPromptId[sizeof(lastPromptId)-1] = 0;
@@ -1039,6 +1039,7 @@ void loop() {
     if (tama.promptId[0]) {
       promptArrivedMs = millis();
       wake();
+      beep(1200, 80);   // prompt arrival
       displayMode = DISP_NORMAL;
       menuOpen = settingsOpen = resetOpen = false;
       applyDisplayMode();
@@ -1064,6 +1065,7 @@ void loop() {
   }
 
   if (g == G_LONG) {
+    beep(800, 60);
     if (resetOpen) { resetOpen = false; redrawAll(); }
     else if (audioOpen) { audioOpen = false; redrawAll(); }
     else if (settingsOpen) { settingsOpen = false; redrawAll(); }
@@ -1088,31 +1090,40 @@ void loop() {
         sendCmd(cmd);
         responseSent = true;
         if (approve) {
+          beep(2400, 60);
           uint32_t tookS = (millis() - promptArrivedMs) / 1000;
           statsOnApproval(tookS);
           if (tookS < 5) triggerOneShot(P_HEART, 2000);
         } else {
+          beep(600, 60);
           statsOnDenial();
         }
       }
     } else if (audioOpen) {
+      beep(1800, 30);
       int r = hitAudio(ty);
       if (r >= 0) { audioSel = r; applyAudio(r); }
     } else if (resetOpen) {
+      beep(1800, 30);
       int r = hitReset(ty);
       if (r >= 0) { resetSel = r; applyReset(r); }
     } else if (settingsOpen) {
+      beep(1800, 30);
       int r = hitSettings(ty);
       if (r >= 0) { settingsSel = r; applySetting(r); }
     } else if (menuOpen) {
+      beep(1800, 30);
       int r = hitMenu(ty);
       if (r >= 0) { menuSel = r; menuConfirm(); }
     } else if (displayMode == DISP_INFO) {
+      beep(1800, 30);
       infoPage = (infoPage + 1) % INFO_PAGES;
     } else if (displayMode == DISP_PET) {
+      beep(1800, 30);
       petPage = (petPage + 1) % PET_PAGES;
       applyDisplayMode();
     } else {
+      beep(1800, 30);
       // Home tap cycles the display modes (normal → pet → info → normal).
       displayMode = (displayMode + 1) % DISP_COUNT;
       applyDisplayMode();
@@ -1150,7 +1161,7 @@ void loop() {
 
   static uint32_t lastPasskey = 0;
   uint32_t pk = blePasskey();
-  if (pk && !lastPasskey) wake();
+  if (pk && !lastPasskey) { wake(); beep(1800, 60); }
   lastPasskey = pk;
 
   if (screenOff) {
