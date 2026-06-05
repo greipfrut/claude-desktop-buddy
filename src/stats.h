@@ -177,32 +177,39 @@ inline uint8_t statsFedProgress() {
 // --- Settings --------------------------------------------------------------
 
 struct Settings {
-  bool    sound;
+  uint8_t volume;    // 0 = off, 1..4 = louder
+  bool    sineWave;  // false = square, true = sine
+  bool    gestures;  // shake + face-down enabled
   bool    bt;
   bool    led;
   bool    hud;
   uint8_t bright;   // 0..4 → 20..100% backlight
 };
 
-static Settings _settings = { true, true, true, true, 2 };
+static Settings _settings = { 3, false, true, true, true, true, 2 };
 
 inline void settingsLoad() {
   _prefs.begin("buddy", true);
-  _settings.sound  = _prefs.getBool("s_snd", true);
-  _settings.bt     = _prefs.getBool("s_bt",  true);
-  _settings.led    = _prefs.getBool("s_led", true);
-  _settings.hud    = _prefs.getBool("s_hud", true);
-  _settings.bright = _prefs.getUChar("s_bri", 2);
+  _settings.volume   = _prefs.getUChar("s_vol", 3);
+  if (_settings.volume > 4) _settings.volume = 3;
+  _settings.sineWave = _prefs.getBool("s_wav", false);
+  _settings.gestures = _prefs.getBool("s_gst", true);
+  _settings.bt       = _prefs.getBool("s_bt",  true);
+  _settings.led      = _prefs.getBool("s_led", true);
+  _settings.hud      = _prefs.getBool("s_hud", true);
+  _settings.bright   = _prefs.getUChar("s_bri", 2);
   if (_settings.bright > 4) _settings.bright = 2;
   _prefs.end();
 }
 
 inline void settingsSave() {
   _prefs.begin("buddy", false);
-  _prefs.putBool("s_snd", _settings.sound);
-  _prefs.putBool("s_bt",  _settings.bt);
-  _prefs.putBool("s_led", _settings.led);
-  _prefs.putBool("s_hud", _settings.hud);
+  _prefs.putUChar("s_vol", _settings.volume);
+  _prefs.putBool("s_wav",  _settings.sineWave);
+  _prefs.putBool("s_gst",  _settings.gestures);
+  _prefs.putBool("s_bt",   _settings.bt);
+  _prefs.putBool("s_led",  _settings.led);
+  _prefs.putBool("s_hud",  _settings.hud);
   _prefs.putUChar("s_bri", _settings.bright);
   _prefs.end();
 }

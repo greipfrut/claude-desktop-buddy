@@ -170,8 +170,8 @@ const uint8_t MENU_N = 6;
 
 bool    settingsOpen = false;
 uint8_t settingsSel  = 0;
-const char* settingsItems[] = { "bright", "sound", "bt", "pair", "led", "hud", "pet", "reset", "back" };
-const uint8_t SETTINGS_N = 9;
+const char* settingsItems[] = { "bright", "sound", "gesture", "bt", "pair", "led", "hud", "pet", "reset", "back" };
+const uint8_t SETTINGS_N = 10;
 
 bool    resetOpen = false;
 uint8_t resetSel  = 0;
@@ -180,25 +180,39 @@ const uint8_t RESET_N = 3;
 static uint32_t resetConfirmUntil = 0;
 static uint8_t  resetConfirmIdx = 0xFF;
 
+bool    audioOpen = false;
+uint8_t audioSel  = 0;
+const char* audioItems[] = { "volume", "wave", "back" };
+const uint8_t AUDIO_N = 3;
+
 static bool pairTrigger = false;
 
 static void applySetting(uint8_t idx) {
   Settings& s = settings();
   switch (idx) {
-    case 0:
-      s.bright = (s.bright + 1) % 5;
-      applyBrightness();
-      break;
-    case 1: s.sound = !s.sound; break;
-    case 2: s.bt = !s.bt; break;
-    case 3: pairTrigger = true; return;
-    case 4: s.led = !s.led; break;
-    case 5: s.hud = !s.hud; break;
-    case 6: nextPet(); return;
-    case 7: resetOpen = true; resetSel = 0; resetConfirmIdx = 0xFF; return;
-    case 8: settingsOpen = false; redrawAll(); return;
+    case 0: s.bright = (s.bright + 1) % 5; applyBrightness(); break;
+    case 1: audioOpen = true; audioSel = 0; return;   // sound → Audio submenu
+    case 2: s.gestures = !s.gestures; break;
+    case 3: s.bt = !s.bt; break;
+    case 4: pairTrigger = true; return;
+    case 5: s.led = !s.led; break;
+    case 6: s.hud = !s.hud; break;
+    case 7: nextPet(); return;
+    case 8: resetOpen = true; resetSel = 0; resetConfirmIdx = 0xFF; return;
+    case 9: settingsOpen = false; redrawAll(); return;
   }
   settingsSave();
+}
+
+static void applyAudio(uint8_t idx) {
+  Settings& s = settings();
+  switch (idx) {
+    case 0: s.volume = (s.volume + 1) % 5; break;   // 0..4, 0 = off
+    case 1: s.sineWave = !s.sineWave; break;
+    case 2: audioOpen = false; return;              // back to settings list
+  }
+  settingsSave();
+  beep(1800, 80);   // sample the new setting by ear (silent if volume==0)
 }
 
 static void applyReset(uint8_t idx) {
@@ -269,7 +283,6 @@ static void drawSettings() {
   spr.drawRoundRect(mx, my, mw, mh, 8, p.textDim);
   spr.setTextSize(3);
   Settings& s = settings();
-  bool vals[] = { s.sound, s.bt, s.led, s.hud };
   for (int i = 0; i < SETTINGS_N; i++) {
     bool sel = (i == settingsSel);
     spr.setTextColor(sel ? p.text : p.textDim, PANEL);
@@ -279,20 +292,61 @@ static void drawSettings() {
     spr.setTextSize(2);
     spr.setCursor(mx + mw - 64, my + 16 + i * 28);
     spr.setTextColor(p.textDim, PANEL);
+    switch (i) {
+      case 0: spr.printf("%u/4", s.bright); break;                     // bright
+      case 1:                                                           // sound → volume
+        if (s.volume == 0) spr.print("off");
+        else               spr.printf("%u/4", s.volume);
+        break;
+      case 2: spr.setTextColor(s.gestures ? GREEN : p.textDim, PANEL);  // gesture
+              spr.print(s.gestures ? " on" : "off"); break;
+      case 3: spr.setTextColor(s.bt ? GREEN : p.textDim, PANEL);        // bt toggle
+              spr.print(s.bt ? " on" : "off"); break;
+      case 4:                                                           // pair status
+        if (!s.bt)                  { spr.print("off"); }
+        else if (bleConnected())    { spr.setTextColor(GREEN, PANEL); spr.print(" ok"); }
+        else                        { spr.setTextColor(HOT, PANEL);   spr.print(" go"); }
+        break;
+      case 5: spr.setTextColor(s.led ? GREEN : p.textDim, PANEL);       // led
+              spr.print(s.led ? " on" : "off"); break;
+      case 6: spr.setTextColor(s.hud ? GREEN : p.textDim, PANEL);       // hud
+              spr.print(s.hud ? " on" : "off"); break;
+      case 7: {                                                         // pet
+        uint8_t total = buddySpeciesCount() + (gifAvailable ? 1 : 0);
+        uint8_t pos   = buddyMode ? buddySpeciesIdx() + 1 : total;
+        spr.printf("%u/%u", pos, total);
+        break;
+      }
+      default: break;   // 8 reset, 9 back: no value column
+    }
+    spr.setTextSize(3);
+  }
+  drawMenuHints(p, mx, mw, my + mh - 14);
+  spr.setTextSize(1);
+}
+
+static void drawAudio() {
+  const Palette& p = characterPalette();
+  Settings& s = settings();
+  int mw = 236, mh = 16 + AUDIO_N * 28 + MENU_HINT_H;
+  int mx = (W - mw) / 2, my = (H - mh) / 2;
+  spr.fillRoundRect(mx, my, mw, mh, 8, PANEL);
+  spr.drawRoundRect(mx, my, mw, mh, 8, p.textDim);
+  spr.setTextSize(3);
+  for (int i = 0; i < AUDIO_N; i++) {
+    bool sel = (i == audioSel);
+    spr.setTextColor(sel ? p.text : p.textDim, PANEL);
+    spr.setCursor(mx + 6, my + 12 + i * 28);
+    spr.print(sel ? "> " : "  ");
+    spr.print(audioItems[i]);
+    spr.setTextSize(2);
+    spr.setCursor(mx + mw - 64, my + 16 + i * 28);
+    spr.setTextColor(p.textDim, PANEL);
     if (i == 0) {
-      spr.printf("%u/4", settings().bright);
-    } else if (i == 3) {
-      if (!s.bt) { spr.setTextColor(p.textDim, PANEL); spr.print("off"); }
-      else if (bleConnected()) { spr.setTextColor(GREEN, PANEL); spr.print(" ok"); }
-      else { spr.setTextColor(HOT, PANEL); spr.print(" go"); }
-    } else if (i == 1 || i == 2 || i == 4 || i == 5) {
-      int vi = (i <= 2) ? i - 1 : i - 2;
-      spr.setTextColor(vals[vi] ? GREEN : p.textDim, PANEL);
-      spr.print(vals[vi] ? " on" : "off");
-    } else if (i == 6) {
-      uint8_t total = buddySpeciesCount() + (gifAvailable ? 1 : 0);
-      uint8_t pos   = buddyMode ? buddySpeciesIdx() + 1 : total;
-      spr.printf("%u/%u", pos, total);
+      if (s.volume == 0) spr.print("off");
+      else               spr.printf("%u/4", s.volume);
+    } else if (i == 1) {
+      spr.print(s.sineWave ? "sin" : "sqr");
     }
     spr.setTextSize(3);
   }
@@ -874,6 +928,14 @@ static int hitReset(int ty) {
   return (i >= 0 && i < RESET_N) ? i : -1;
 }
 
+static int hitAudio(int ty) {
+  int mh = 16 + AUDIO_N * 28 + MENU_HINT_H;
+  int my = (H - mh) / 2;
+  int firstY = my + 10;
+  int i = (ty - firstY) / 28;
+  return (i >= 0 && i < AUDIO_N) ? i : -1;
+}
+
 void setup() {
   Serial.begin(115200);
 
@@ -1003,6 +1065,7 @@ void loop() {
 
   if (g == G_LONG) {
     if (resetOpen) { resetOpen = false; redrawAll(); }
+    else if (audioOpen) { audioOpen = false; redrawAll(); }
     else if (settingsOpen) { settingsOpen = false; redrawAll(); }
     else {
       menuOpen = !menuOpen;
@@ -1032,6 +1095,9 @@ void loop() {
           statsOnDenial();
         }
       }
+    } else if (audioOpen) {
+      int r = hitAudio(ty);
+      if (r >= 0) { audioSel = r; applyAudio(r); }
     } else if (resetOpen) {
       int r = hitReset(ty);
       if (r >= 0) { resetSel = r; applyReset(r); }
@@ -1123,6 +1189,7 @@ void loop() {
     else if (displayMode == DISP_PET) drawPet();
     else if (settings().hud) drawHUD();
     if (resetOpen) drawReset();
+    else if (audioOpen) drawAudio();
     else if (settingsOpen) drawSettings();
     else if (menuOpen) drawMenu();
   }
