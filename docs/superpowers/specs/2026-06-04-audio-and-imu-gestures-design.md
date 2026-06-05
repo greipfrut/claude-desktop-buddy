@@ -325,3 +325,70 @@ intrusive. See the Settings & UI section.
 - Pin config: `...\Arduino-v3.2.0\libraries\Mylibrary\pin_config.h`
 - Original M5 gesture/beep source: git rev `8ac960d:src/main.cpp`
 - PlatformIO: `C:\Users\tsphan-ahc\.platformio\penv\Scripts\pio.exe` (COM4)
+
+## IMPLEMENTATION ADDENDUM (discovered during build-out)
+
+### Reboot crash — root cause + fix
+
+The 4B spontaneously reboots under BLE workload: a panic `Cache disabled but
+cached memory region accessed` (EXCCAUSE 0x7) in the RGB-LCD restart ISR, which
+(with `CONFIG_LCD_RGB_RESTART_IN_VSYNC=y`) calls GDMA control functions that the
+precompiled libs leave in flash (`CONFIG_GDMA_CTRL_FUNC_IN_IRAM` unset). Any
+flash op that disables the cache makes the per-VSYNC ISR fault.
+
+- **Band-aid shipped (commit 307fa4a):** the dominant trigger was the BLE "status"
+  reply computing `fsFree` via `LittleFS.usedBytes()`/`totalBytes()` — each walks
+  the whole filesystem. Both are cached now (`xferRefreshFsUsed()`), refreshed only
+  at boot (before the panel starts) and after a transfer. Uptime <2 min → 13+ min.
+- **Complete fix:** `CONFIG_GDMA_CTRL_FUNC_IN_IRAM=y` (needs the rebuild below).
+
+### Audio — root cause + why a rebuild is required
+
+`audioInit()`'s `i2s.begin()` FAILS on the precompiled libs:
+`gdma: gdma_register_tx_event_callbacks: user context not in internal RAM`.
+Cause: `CONFIG_GDMA_ISR_IRAM_SAFE=y` (GDMA requires an internal-RAM DMA context)
+but `CONFIG_I2S_ISR_IRAM_SAFE` is unset (I2S context can land in PSRAM). So
+`audioReady` stays false and every `beep()` is a no-op (silent). NOT a memory
+shortage (261 KB internal free, still fails). The manufacturer demos only work
+because they were built against a different toolchain config.
+
+Audio tasks 1–4 are committed and correct (settings UI, Audio submenu, ES8311
+driver, beep call sites) but produce no sound until the framework is rebuilt.
+
+### Proven-good flags (from the 4B Brookesia ESP-IDF demo, which plays audio
+AND drives the RGB panel on this exact board —
+`...\ESP-IDF-v5.4.2\03_esp-brookesia\sdkconfig`):
+`CONFIG_GDMA_ISR_IRAM_SAFE` **off**, `CONFIG_GDMA_CTRL_FUNC_IN_IRAM=y`,
+`CONFIG_LCD_RGB_ISR_IRAM_SAFE` off, `CONFIG_LCD_RGB_RESTART_IN_VSYNC` off.
+
+### Next-session rebuild recipe (fixes audio + crash together)
+
+1. **platformio.ini `custom_sdkconfig`:**
+   - `CONFIG_GDMA_ISR_IRAM_SAFE=n`   ← makes `i2s.begin()` succeed (audio)
+   - `CONFIG_GDMA_CTRL_FUNC_IN_IRAM=y`   ← complete RGB-panel crash fix
+   - `CONFIG_ARDUINO_SELECTIVE_COMPILATION=y` + a `CONFIG_ARDUINO_SELECTIVE_<lib>=y`
+     line for every Arduino lib actually used (≥ `BLE`, `FS`, `LittleFS`,
+     `Preferences`, `Wire`, `SPI`; add more if the link fails on a missing symbol).
+     Do NOT enable `Insights`, `RainMaker`, `ESP_SR`, `Zigbee`, `Matter`,
+     `OpenThread` — leaving them out is what stops `esp_insights` from building and
+     dodges the cert-embed bug (pioarduino never generates `https_server.crt.S`;
+     switching `ESP_INSIGHTS_TRANSPORT_MQTT` does NOT help).
+2. **Reimplement `audio.cpp` on the IDF I2S driver** (`driver/i2s_std.h`):
+   SELECTIVE_COMPILATION drops the `ESP_I2S` Arduino wrapper (it has no selective
+   flag). Keep the synth/`AMP[]`/queue/`audioTask`/`beep()` logic verbatim; replace
+   `I2SClass i2s` + `i2s.setPins/begin/write` with `i2s_chan_handle_t` +
+   `i2s_new_channel` / `i2s_channel_init_std_mode` / `i2s_channel_enable` /
+   `i2s_channel_write`. ES8311 codec init (es8311.c) is unchanged.
+3. **Wipe `.pio/build/<env>` before building** (precompiled↔source switch leaves a
+   stale CMake cache → bogus doubled generated-source paths). First source build is
+   slow (downloads + compiles all of IDF; exceeds the 10-min background cap — just
+   re-launch and it resumes incrementally from cache).
+4. **Verify:** temporarily set `-DARDUINO_USB_CDC_ON_BOOT=0` so app `Serial` reaches
+   COM4 (this board's COM4 is a CH343→UART0; app Serial otherwise goes to the
+   native-USB pins, invisible). Look for `[audio] ready` + a boot self-test beep,
+   then revert to `=1`.
+
+### IMU gestures (Tasks 5–7) need no rebuild
+
+QMI8658 is I2C polling via SensorLib (no DMA), unaffected by the GDMA/I2S config.
+Tasks 5–7 can be implemented and run on the current precompiled libs.
