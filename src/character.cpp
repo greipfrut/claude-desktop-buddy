@@ -60,12 +60,14 @@ static void gifPlace() {
     outW = peekIsHalf ? gifW / 2 : gifW;
     outH = peekIsHalf ? gifH / 2 : gifH;
   } else {
-    homeScale = (gifW * 2 <= canvas->width() && gifH * 2 <= 210) ? 2 : 1;
+    int maxW = 360, maxH = 280;
+    homeScale = (gifW * 3 <= maxW && gifH * 3 <= maxH) ? 3
+              : (gifW * 2 <= maxW && gifH * 2 <= maxH) ? 2 : 1;
     outW = gifW * homeScale;
     outH = gifH * homeScale;
   }
   gifX = (canvas->width() - outW) / 2;
-  gifY = peekMode ? (PEEK_TOP - outH) / 2 : (210 - outH) / 2;
+  gifY = peekMode ? (PEEK_TOP - outH) / 2 : 40 + (360 - outH) / 2;
 }
 static uint32_t    nextFrameAt = 0;
 static uint32_t    animPauseUntil = 0;
@@ -152,8 +154,21 @@ static void gifDrawCb(GIFDRAW* d) {
   int w = d->iWidth;
   if (w > 256) w = 256;
 
-  // Home 2× path: each source pixel becomes a 2×2 block. TFT_eSprite::drawPixel
-  // clips out-of-bounds writes internally so no manual guard needed.
+  // Home 3× path: each source pixel becomes a 3×3 block.
+  if (homeScale == 3) {
+    int yBase = gifY + srcY * 3;
+    int xBase = gifX + d->iX * 3;
+    for (int i = 0; i < w; i++) {
+      uint8_t idx = src[i];
+      int x = xBase + i * 3;
+      for (int dy = 0; dy < 3; dy++)
+        for (int dx = 0; dx < 3; dx++)
+          put(x + dx, yBase + dy, idx);
+    }
+    return;
+  }
+
+  // Home 2× path: each source pixel becomes a 2×2 block.
   if (homeScale == 2) {
     int yBase = gifY + srcY * 2;
     int xBase = gifX + d->iX * 2;

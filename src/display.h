@@ -6,9 +6,9 @@
 #define PANEL_WIDTH   480
 #define PANEL_HEIGHT  480
 
-// Canvas (sprite) dimensions — matches the existing 240x320 UI
-#define LCD_WIDTH     240
-#define LCD_HEIGHT    320
+// Canvas (sprite) dimensions — full native 480x480 panel
+#define LCD_WIDTH     480
+#define LCD_HEIGHT    480
 
 // Canvas offset to center 240x320 on the 480x480 panel
 #define CANVAS_OFF_X  ((PANEL_WIDTH  - LCD_WIDTH)  / 2)   // 120

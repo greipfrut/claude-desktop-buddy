@@ -13,9 +13,9 @@ enum { B_SLEEP, B_IDLE, B_BUSY, B_ATTENTION, B_CELEBRATE, B_DIZZY, B_HEART };
 // BUDDY_X_CENTER and stacks down from BUDDY_Y_BASE. Y_BASE bumped from
 // 30 → 60 so the 2× body lands near vertical center of the taller panel
 // instead of clinging to the top.
-const int BUDDY_X_CENTER = 120;
-const int BUDDY_CANVAS_W = 240;
-const int BUDDY_Y_BASE   = 60;
+const int BUDDY_X_CENTER = 240;   // center of the 480-wide canvas
+const int BUDDY_CANVAS_W = 480;   // full-width clear strip
+const int BUDDY_Y_BASE   = 150;   // top of the buddy block, below the ~40px top bar
 const int BUDDY_Y_OVERLAY = 6;
 const int BUDDY_CHAR_W   = 6;
 const int BUDDY_CHAR_H   = 8;
@@ -62,7 +62,7 @@ void buddyPrintSprite(const char* const* lines, uint8_t nLines, int yOffset, uin
   //   s=1  landscape-clock path (buddyRenderTo) — kept near BUDDY_Y_BASE
   //   s=2  peek (info/pet pages) — body 5×16=80 px, fits the 0..100 strip
   //   s=3  home — body 5×24=120 px, shifted up to clear the HUD at y≈220
-  int yBase = (_scale >= 3) ? 70
+  int yBase = (_scale >= 3) ? 120
             : (_scale == 2) ? 10
             : BUDDY_Y_BASE;
   for (uint8_t i = 0; i < nLines; i++) {
@@ -200,7 +200,7 @@ void buddyTick(uint8_t personaState) {
 
   // Clear only the active zone — peek owns 0..100, home owns 0..210. Clearing
   // further erases the info/pet content below.
-  int stripH = (_scale >= 3) ? 210 : 100;
+  int stripH = (_scale >= 3) ? 400 : 100;
   canvas->fillRect(0, 0, BUDDY_CANVAS_W, stripH, BUDDY_BG);
 
   const Species* sp = SPECIES_TABLE[currentSpeciesIdx];
