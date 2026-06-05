@@ -15,6 +15,7 @@ using fs::File;
 #include "buddy.h"
 #include "character.h"
 #include "stats.h"
+#include "audio.h"
 
 // ───────────────────────────────────────────────────────────────────────────
 // Canvas + panel geometry
@@ -134,8 +135,6 @@ static void wake() {
 bool responseSent = false;
 static bool lastBtSetting = true;
 
-// No buzzer on this board — beep() is a stub so call sites don't branch.
-static void beep(uint16_t, uint16_t) {}
 
 static void sendCmd(const char* json) {
   Serial.println(json);
@@ -947,6 +946,7 @@ void setup() {
   xferRefreshFsUsed();
 
   displayInit();    // I2C, expander, RGB panel, canvas — all in one call
+  audioInit();      // ES8311 + I2S + speaker amp; beep() is a no-op until this runs
 
   startBt();
   lastInteractMs = millis();
