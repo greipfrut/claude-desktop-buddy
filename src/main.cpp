@@ -59,6 +59,7 @@ const uint16_t HOT   = 0xFA20;   // red-orange: warnings, impatience, deny
 const uint16_t PANEL = 0x2104;   // overlay panel background
 // GREEN (0x07E0) and RED (0xF800) are defined as macros in compat.h
 
+
 enum PersonaState { P_SLEEP, P_IDLE, P_BUSY, P_ATTENTION, P_CELEBRATE, P_DIZZY, P_HEART };
 const char* stateNames[] = { "sleep", "idle", "busy", "attention", "celebrate", "dizzy", "heart" };
 
@@ -72,7 +73,7 @@ unsigned long t = 0;
 bool    menuOpen    = false;
 uint8_t menuSel     = 0;
 
-enum DisplayMode { DISP_NORMAL, DISP_PET, DISP_INFO, DISP_COUNT };
+enum DisplayMode { DISP_NORMAL, DISP_PET, DISP_TRANSCRIPT, DISP_INFO, DISP_COUNT };
 uint8_t displayMode = DISP_NORMAL;
 uint8_t infoPage = 0;
 uint8_t petPage = 0;
@@ -81,6 +82,7 @@ uint8_t msgScroll = 0;
 uint16_t lastLineGen = 0;
 char     lastPromptId[40] = "";
 int      hintScroll = 0;
+int      transcriptScroll = 0;
 uint32_t lastInteractMs = 0;
 bool     dimmed = false;
 bool     screenOff = false;
@@ -637,18 +639,43 @@ static uint8_t wrapInto(const char* in, char out[][40], uint8_t maxRows, uint8_t
   return row;
 }
 
+static bool isAskUserQuestion() {
+  return strcmp(tama.promptTool, "AskUserQuestion") == 0;
+}
+
 static void drawApproval() {
   const Palette& p = characterPalette();
   spr.fillScreen(p.bg);
 
-  // Header: elapsed timer
+  bool isAUQ = isAskUserQuestion();
+
+  if (isAUQ) {
+    // AskUserQuestion: info-only screen, no permission buttons.
+    // The user answers on desktop; this is just a notification.
+    spr.setTextSize(4);
+    spr.setTextColor(p.text, p.bg);
+    drawCenteredString(canvas, "question", CX, H / 2 - 60);
+    drawCenteredString(canvas, "for you", CX, H / 2 - 10);
+    spr.setTextSize(3);
+    spr.setTextColor(p.textDim, p.bg);
+    drawCenteredString(canvas, "answer on desktop", CX, H / 2 + 50);
+
+    int btnY = H - 84, btnH = 76;
+    spr.fillRoundRect(W/4, btnY, W/2, btnH, 12, p.textDim);
+    spr.setTextSize(3);
+    spr.setTextColor(p.bg, p.textDim);
+    drawCenteredString(canvas, "dismiss", W/2, btnY + btnH/2);
+    spr.setTextSize(1);
+    return;
+  }
+
+  // Normal approval screen
   uint32_t waited = (millis() - promptArrivedMs) / 1000;
   spr.setTextSize(2);
   spr.setTextColor(waited >= 10 ? HOT : p.textDim, p.bg);
   spr.setCursor(12, 12);
   spr.printf("approve? %lus", (unsigned long)waited);
 
-  // Tool name
   spr.setTextSize(3);
   spr.setTextColor(p.text, p.bg);
   spr.setCursor(12, 44);
@@ -690,7 +717,7 @@ static void drawApproval() {
     spr.fillRect(W - 6, barY, 4, barH, p.textDim);
   }
 
-  // OK / NO buttons pinned to bottom
+  // OK / NO buttons
   int btnY = H - 84, btnH = 76;
   if (responseSent) {
     spr.setTextColor(p.textDim, p.bg); spr.setTextSize(3);
@@ -818,6 +845,12 @@ void drawPet() {
   drawStatusBars();
 }
 
+static void fmtTokens(char* buf, size_t sz, uint32_t v) {
+  if (v >= 1000000) snprintf(buf, sz, "%lu.%luM", v/1000000, (v/100000)%10);
+  else if (v >= 1000) snprintf(buf, sz, "%lu.%luK", v/1000, (v/100)%10);
+  else snprintf(buf, sz, "%lu", (unsigned long)v);
+}
+
 static void drawStatusBars() {
   const Palette& p = characterPalette();
 
@@ -844,25 +877,159 @@ static void drawStatusBars() {
   spr.setCursor(W - 8 - btw, 12);
   spr.print(batBuf);
 
-  // ── Bottom bar (y H-40..H): sessions/level · status msg ──
-  spr.fillRect(0, H - 40, W, 40, p.bg);
+  // ── Bottom bar (y H-80..H): sessions/tokens line + 2 transcript lines ──
+  spr.fillRect(0, H - 80, W, 80, p.bg);
   spr.setTextSize(2);
 
+  // Line 1: session counts (left) + tokens_today (right)
   spr.setTextColor(p.textDim, p.bg);
-  spr.setCursor(8, H - 36);
+  spr.setCursor(8, H - 76);
   spr.printf("%u running  %u waiting  lv %u",
     tama.sessionsRunning, tama.sessionsWaiting, stats().level);
 
-  spr.setTextColor(p.body, p.bg);
-  spr.setCursor(8, H - 18);
-  spr.print(tama.msg);
+  if (tama.tokensToday > 0) {
+    char tokBuf[12];
+    fmtTokens(tokBuf, sizeof(tokBuf), tama.tokensToday);
+    int16_t bx, by; uint16_t tw, th;
+    spr.getTextBounds(tokBuf, 0, 0, &bx, &by, &tw, &th);
+    spr.setTextColor(p.body, p.bg);
+    spr.setCursor(W - 8 - tw, H - 76);
+    spr.print(tokBuf);
+  }
 
+  // Lines 2-3: two most recent transcript entries (truncated to screen width)
+  const int MAX_BOTTOM_CHARS = (W - 16) / 12;  // 12px per char at textSize 2
+  char truncBuf[40];
+  for (int i = 0; i < 2 && i < tama.nLines; i++) {
+    spr.setTextColor(i == 0 ? p.textDim : p.textDim, p.bg);
+    spr.setCursor(8, H - 56 + i * 20);
+    int len = strlen(tama.lines[i]);
+    if (len > MAX_BOTTOM_CHARS) {
+      memcpy(truncBuf, tama.lines[i], MAX_BOTTOM_CHARS - 1);
+      truncBuf[MAX_BOTTOM_CHARS - 1] = '\0';
+      spr.print(truncBuf);
+    } else {
+      spr.print(tama.lines[i]);
+    }
+  }
+
+  spr.setTextSize(1);
+}
+
+static void drawTranscript() {
+  const Palette& p = characterPalette();
+  spr.fillScreen(p.bg);
+
+  // Top bar (shared)
+  spr.fillRect(0, 0, W, 40, p.bg);
+  spr.setTextSize(2);
+  if (dataRtcValid()) {
+    spr.setTextColor(p.textDim, p.bg);
+    spr.setCursor(8, 12);
+    spr.printf("%02u:%02u", _clkTm.Hours, _clkTm.Minutes);
+  }
+  spr.setTextColor(p.text, p.bg);
+  drawCenteredString(canvas, petName(), W / 2, 20);
+  {
+    int pct = batteryPercent();
+    bool chrg = batteryCharging();
+    char batBuf[12];
+    snprintf(batBuf, sizeof(batBuf), chrg ? "%d%%~" : "%d%%", pct);
+    int16_t bx1, by1; uint16_t btw, bth;
+    spr.getTextBounds(batBuf, 0, 0, &bx1, &by1, &btw, &bth);
+    spr.setTextColor(chrg ? GREEN : p.textDim, p.bg);
+    spr.setCursor(W - 8 - btw, 12);
+    spr.print(batBuf);
+  }
+
+  // Summary line (y 40..60): sessions + tokens
+  spr.setTextSize(2);
+  spr.setTextColor(p.textDim, p.bg);
+  spr.setCursor(8, 44);
+  spr.printf("%u running  %u waiting  lv %u",
+    tama.sessionsRunning, tama.sessionsWaiting, stats().level);
+  if (tama.tokensToday > 0) {
+    char tokBuf[12];
+    fmtTokens(tokBuf, sizeof(tokBuf), tama.tokensToday);
+    int16_t bx, by; uint16_t tw, th;
+    spr.getTextBounds(tokBuf, 0, 0, &bx, &by, &tw, &th);
+    spr.setTextColor(p.body, p.bg);
+    spr.setCursor(W - 8 - tw, 44);
+    spr.print(tokBuf);
+  }
+
+  // Transcript body (y 64..436)
+  const int BODY_Y = 64, BODY_H = 372, LINE_H = 22;
+  const int WRAP_COLS = 37;
+  spr.setTextSize(2);
+
+  // Calculate total height and render
+  int totalH = 0;
+  int lineHeights[8];
+  for (int i = 0; i < tama.nLines; i++) {
+    int len = strlen(tama.lines[i]);
+    int wrapped = (len + WRAP_COLS - 1) / WRAP_COLS;
+    if (wrapped < 1) wrapped = 1;
+    lineHeights[i] = wrapped * LINE_H + 6;
+    totalH += lineHeights[i];
+  }
+
+  int maxScroll = totalH - BODY_H;
+  if (maxScroll < 0) maxScroll = 0;
+  if (transcriptScroll > maxScroll) transcriptScroll = maxScroll;
+  if (transcriptScroll < 0) transcriptScroll = 0;
+
+  int yy = BODY_Y - transcriptScroll;
+  char wrapLine[48];
+  for (int i = 0; i < tama.nLines; i++) {
+    // Color gradient: newest bright, oldest dim
+    uint8_t fade = (tama.nLines > 1) ? (i * 255 / (tama.nLines - 1)) : 0;
+    uint16_t col = (fade < 128) ? p.text : p.textDim;
+
+    // Left border accent
+    int entryTop = yy;
+    int entryBot = yy + lineHeights[i] - 6;
+    if (entryBot > BODY_Y && entryTop < BODY_Y + BODY_H) {
+      int drawTop = max(entryTop, BODY_Y);
+      int drawBot = min(entryBot, BODY_Y + BODY_H);
+      spr.fillRect(8, drawTop, 2, drawBot - drawTop, p.body);
+    }
+
+    // Word-wrapped text
+    int len = strlen(tama.lines[i]);
+    spr.setTextColor(col, p.bg);
+    for (int off = 0; off < len; off += WRAP_COLS) {
+      if (yy + LINE_H > BODY_Y && yy < BODY_Y + BODY_H) {
+        int take = min((int)(len - off), WRAP_COLS);
+        memcpy(wrapLine, tama.lines[i] + off, take);
+        wrapLine[take] = 0;
+        spr.setCursor(18, yy);
+        spr.print(wrapLine);
+      }
+      yy += LINE_H;
+    }
+    yy += 6;
+  }
+
+  // Scrollbar
+  if (maxScroll > 0) {
+    int barH = BODY_H * BODY_H / totalH;
+    if (barH < 10) barH = 10;
+    int barY = BODY_Y + (BODY_H - barH) * transcriptScroll / maxScroll;
+    spr.fillRect(W - 6, BODY_Y, 4, BODY_H, p.bg);
+    spr.fillRect(W - 6, barY, 4, barH, p.textDim);
+  }
+
+  // Bottom hint
+  spr.setTextColor(p.textDim, p.bg);
+  spr.setTextSize(2);
+  drawCenteredString(canvas, "tap: home   hold: menu", W / 2, H - 18);
   spr.setTextSize(1);
 }
 
 void drawHUD() {
   if (tama.promptId[0]) { drawApproval(); return; }
-  if (tama.lineGen != lastLineGen) { msgScroll = 0; lastLineGen = tama.lineGen; wake(); }
+  if (tama.lineGen != lastLineGen) { msgScroll = 0; transcriptScroll = 0; lastLineGen = tama.lineGen; wake(); }
   drawStatusBars();
 }
 
@@ -886,6 +1053,7 @@ static uint16_t gDownY        = 0;
 static uint16_t lastTapX      = 0;
 static uint16_t lastTapY      = 0;
 static int16_t  gDragDy       = 0;
+static bool     gDragSeen     = false;
 
 static GestureKind pollGesture() {
   static uint16_t gPrevY = 0;
@@ -898,6 +1066,7 @@ static GestureKind pollGesture() {
       gHeld = true;
       gDownMs = now;
       gLongFired = false;
+      gDragSeen = false;
       gDownX = x; gDownY = y;
       gPrevY = y;
     } else if (!gLongFired) {
@@ -905,6 +1074,7 @@ static GestureKind pollGesture() {
       gPrevY = y;
       if (abs((int)y - (int)gDownY) > 12) {
         gDragDy = dy;
+        gDragSeen = true;
         gLastSeenMs = now;
         return G_DRAG;
       }
@@ -914,7 +1084,7 @@ static GestureKind pollGesture() {
     gLastSeenMs = now;
   }
 
-  if (gHeld && !gLongFired && now - gDownMs > 600) {
+  if (gHeld && !gLongFired && !gDragSeen && now - gDownMs > 600) {
     gLongFired = true;
     return G_LONG;
   }
@@ -1078,7 +1248,7 @@ void loop() {
     hintScroll = 0;
     promptArrivedMs = millis();
     wake();
-    beep(1200, 80);   // prompt arrival
+      beep(1200, 80);   // prompt arrival
     displayMode = DISP_NORMAL;
     menuOpen = settingsOpen = resetOpen = audioOpen = false;
     applyDisplayMode();
@@ -1110,7 +1280,10 @@ void loop() {
     }
   }
 
-  if (g == G_DRAG && inPrompt) { hintScroll -= gDragDy; }
+  if (g == G_DRAG) {
+    if (inPrompt) hintScroll -= gDragDy;
+    else if (displayMode == DISP_TRANSCRIPT) transcriptScroll -= gDragDy;
+  }
 
   if (g == G_LONG) {
     beep(800, 60);
@@ -1126,10 +1299,13 @@ void loop() {
     int tx = lastTapX, ty = lastTapY;
 
     if (inPrompt) {
-      // Only the two button rectangles at the bottom fire — the info area
-      // above them is non-interactive, so an accidental tap near the top
-      // doesn't approve or deny.
-      if (ty >= H - 84) {
+      if (ty >= H - 84 && isAskUserQuestion()) {
+        // Dismiss the notification and return to buddy screen. No permission
+        // response is sent -- the user answers on desktop.
+        tama.promptId[0] = 0;
+        redrawAll();
+        beep(1800, 30);
+      } else if (ty >= H - 84) {
         bool approve = tx < W / 2;
         char cmd[96];
         snprintf(cmd, sizeof(cmd),
@@ -1168,10 +1344,17 @@ void loop() {
       if (r >= 0) { menuSel = r; menuConfirm(); }
     } else if (displayMode == DISP_INFO) {
       beep(1800, 30);
-      infoPage = (infoPage + 1) % INFO_PAGES;
+      if (infoPage + 1 >= INFO_PAGES) {
+        infoPage = 0;
+        displayMode = (displayMode + 1) % DISP_COUNT;
+        applyDisplayMode();
+      } else {
+        infoPage++;
+      }
     } else if (displayMode == DISP_PET) {
       beep(1800, 30);
-      petPage = (petPage + 1) % PET_PAGES;
+      petPage = 0;
+      displayMode = (displayMode + 1) % DISP_COUNT;
       applyDisplayMode();
     } else {
       beep(1800, 30);
@@ -1251,6 +1434,7 @@ void loop() {
     else if (clocking) drawClock();
     else if (displayMode == DISP_INFO) drawInfo();
     else if (displayMode == DISP_PET) drawPet();
+    else if (displayMode == DISP_TRANSCRIPT) drawTranscript();
     else if (settings().hud) drawHUD();
     if (resetOpen) drawReset();
     else if (audioOpen) drawAudio();

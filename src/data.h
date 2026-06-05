@@ -12,14 +12,17 @@ struct TamaState {
   bool     recentlyCompleted;
   uint32_t tokensToday;
   uint32_t lastUpdated;
-  char     msg[24];
+  char     msg[100];
   bool     connected;
-  char     lines[8][92];
+  char     lines[8][200];
   uint8_t  nLines;
   uint16_t lineGen;          // bumps when lines change — lets UI reset scroll
   char     promptId[40];     // pending permission request ID; empty = no prompt
-  char     promptTool[20];
-  char     promptHint[44];
+  char     promptTool[48];
+  char     promptHint[256];
+  char     lastTurnRole[12];     // "assistant" or "user"
+  char     lastTurnSnippet[120]; // first text block, truncated
+  uint32_t lastTurnMs;           // millis() when received
 };
 
 // ---------------------------------------------------------------------------
@@ -86,6 +89,34 @@ static void _applyJson(const char* line, TamaState* out) {
     return;
   }
 
+  // Turn events: {"evt":"turn","role":"...","content":[{"type":"text","text":"..."}]}
+  const char* evt = doc["evt"];
+  if (evt && strcmp(evt, "turn") == 0) {
+    const char* role = doc["role"];
+    if (role) {
+      strncpy(out->lastTurnRole, role, sizeof(out->lastTurnRole)-1);
+      out->lastTurnRole[sizeof(out->lastTurnRole)-1] = 0;
+    }
+    out->lastTurnSnippet[0] = 0;
+    JsonArray content = doc["content"];
+    if (!content.isNull()) {
+      for (JsonVariant block : content) {
+        const char* btype = block["type"];
+        if (btype && strcmp(btype, "text") == 0) {
+          const char* txt = block["text"];
+          if (txt) {
+            strncpy(out->lastTurnSnippet, txt, sizeof(out->lastTurnSnippet)-1);
+            out->lastTurnSnippet[sizeof(out->lastTurnSnippet)-1] = 0;
+          }
+          break;
+        }
+      }
+    }
+    out->lastTurnMs = millis();
+    _lastLiveMs = millis();
+    return;
+  }
+
   out->sessionsTotal     = doc["total"]     | out->sessionsTotal;
   out->sessionsRunning   = doc["running"]   | out->sessionsRunning;
   out->sessionsWaiting   = doc["waiting"]   | out->sessionsWaiting;
@@ -101,7 +132,7 @@ static void _applyJson(const char* line, TamaState* out) {
     for (JsonVariant v : la) {
       if (n >= 8) break;
       const char* s = v.as<const char*>();
-      strncpy(out->lines[n], s ? s : "", 91); out->lines[n][91]=0;
+      strncpy(out->lines[n], s ? s : "", sizeof(out->lines[n])-1); out->lines[n][sizeof(out->lines[n])-1]=0;
       n++;
     }
     if (n != out->nLines || (n > 0 && strcmp(out->lines[n-1], out->msg) != 0)) {
@@ -138,7 +169,7 @@ struct _LineBuf {
   }
 };
 
-static _LineBuf<1024> _usbLine, _btLine;
+static _LineBuf<4096> _usbLine, _btLine;
 
 inline void dataPoll(TamaState* out) {
   uint32_t now = millis();
