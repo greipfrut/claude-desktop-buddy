@@ -161,8 +161,8 @@ static void redrawAll() {
   if (buddyMode) buddyInvalidate();
 }
 
-const char* menuItems[] = { "settings", "turn off", "help", "about", "demo", "close" };
-const uint8_t MENU_N = 6;
+const char* menuItems[] = { "settings", "about", "close" };
+const uint8_t MENU_N = 3;
 
 bool    settingsOpen = false;
 uint8_t settingsSel  = 0;
@@ -374,17 +374,14 @@ static void drawReset() {
 void menuConfirm() {
   switch (menuSel) {
     case 0: settingsOpen = true; menuOpen = false; settingsSel = 0; break;
-    case 1: powerOff(); break;
-    case 2:
-    case 3:
+    case 1:
       menuOpen = false;
       displayMode = DISP_INFO;
-      infoPage = (menuSel == 2) ? INFO_PG_BUTTONS : INFO_PG_CREDITS;
+      infoPage = INFO_PG_CREDITS;
       applyDisplayMode();
       characterInvalidate();
       break;
-    case 4: dataSetDemo(!dataDemo()); break;
-    case 5: menuOpen = false; redrawAll(); break;
+    case 2: menuOpen = false; redrawAll(); break;
   }
 }
 
@@ -401,7 +398,6 @@ void drawMenu() {
     spr.setCursor(mx + 12, my + 18 + i * 44);
     spr.print(sel ? "> " : "  ");
     spr.print(menuItems[i]);
-    if (i == 4) spr.print(dataDemo() ? " on" : " off");
   }
   drawMenuHints(p, mx, mw, my + mh - 14);
   spr.setTextSize(1);
